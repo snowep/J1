@@ -10,6 +10,7 @@
   "workspace": "workspace",
   "memory_path": "memory",
   "internet_path": "workspace/research",
+  "summaries_path": "summaries",
   "conversation": {
     "max_history": 10
   },

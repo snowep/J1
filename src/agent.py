@@ -4,6 +4,7 @@ from src.file_manager import FileManager
 from src.terminal_executor import TerminalExecutor
 from src.memory import Memory
 from src.internet import Internet
+from src.summarizer import Summarizer
 
 
 class Agent:
@@ -19,6 +20,7 @@ class Agent:
             log_path='workspace/terminal_log.json'
         )
         self.internet = Internet(research_path=self.config.get('internet_path', 'workspace/research'))
+        self.summarizer = Summarizer(summaries_path=self.config.get('summaries_path', 'summaries'))
         self.memory = Memory(memory_path=self.config.get('memory_path', 'memory'))
         self.history = []
         self.max_history = self.config.get('conversation', {}).get('max_history', 10)
@@ -27,14 +29,14 @@ class Agent:
         self.log_file = 'log.md'
 
     def _log_activity(self, operation, details):
-        """Automatically log significant operations to log.md."""
+        """Auto-log significant operations to log.md."""
         timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
         entry = f"\n### {timestamp}\n- **{operation}**: {details}"
         try:
             with open(self.log_file, 'a', encoding='utf-8') as f:
                 f.write(entry)
-        except Exception as e:
-            print(f"⚠️ Could not write to log: {e}")
+        except:
+            pass
 
     def _call_llm(self, prompt):
         try:
@@ -62,7 +64,6 @@ class Agent:
 - Concise responses, efficient and direct
 - Loyal and attentive to user preferences
 - Occasionally light sarcasm (never mean)
-- Use phrases like "Certainly", "Right away", "If you'd like"
 
 ## Memory
 You have access to user preferences and recent conversations.
@@ -115,8 +116,8 @@ Now, how may I assist you?"""
     def _handle_self_edit_request(self, text):
         text_l = text.lower()
         if any(k in text_l for k in ['can you', 'would you', 'could you', 'do you']):
-            return "Certainly. I can edit my own code files. Which file would you like me to change? For example: 'edit src/agent.py change X to Y'"
-        return "I'd be happy to edit my code. What would you like me to change? Please tell me which file and what to change."
+            return "Certainly. I can edit my own code files. Which file would you like me to change?"
+        return "I'd be happy to edit my code. What would you like me to change?"
 
     def _handle_browse(self, text):
         text_l = text.lower()
@@ -126,203 +127,92 @@ Now, how may I assist you?"""
         if url_match:
             url = url_match.group(1)
             if not self.internet.is_enabled():
-                return "🌐 Internet access is disabled. Type 'enable internet' to allow browsing."
+                return "🌐 Internet access is disabled."
             if self.config.get('permissions', {}).get('internet', 'ask') == 'ask':
                 response = input(f"🌐 Browse to {url}? (y/n): ").strip().lower()
                 if response not in ['y', 'yes']:
                     return "Browsing cancelled."
             result = self.internet.browse(url, save=save)
             if result['success']:
-                self._log_activity("Internet", f"Browsed {url} - {result['title']}")
-                output = f"📄 {result['title']}\n\n{result['content'][:1000]}"
-                if len(result['content']) > 1000:
-                    output += "...\n(truncated)"
+                self._log_activity("Internet", f"Browsed {url}")
+                output = f"📄 {result['title']}\n\n{result['content'][:1000]}..."
                 if 'saved' in result:
                     output += f"\n\n💾 Saved to: {result['saved']}"
-                    self._log_activity("Research", f"Saved to {result['saved']}")
                 return output
             return f"❌ {result['error']}"
 
         if any(k in text_l for k in ['look up', 'search for', 'find', 'google']):
             if not self.internet.is_enabled():
-                return "🌐 Internet access is disabled. Type 'enable internet' to allow searching."
-            query = text
-            for w in ['look up', 'search for', 'find', 'google', 'what is', 'who is']:
-                query = re.sub(r'\b' + w + r'\b', '', query, flags=re.I).strip()
+                return "🌐 Internet access is disabled."
+            query = re.sub(r'\b(look up|search for|find|google)\s+', '', text, flags=re.I).strip()
             if not query:
                 return "What would you like me to search for?"
             result = self.internet.search(query)
             if result['success']:
-                self._log_activity("Search", f"Searched for '{query}' - {len(result['results'])} results")
-                output = f"🔍 Search results for '{query}':\n\n"
+                self._log_activity("Search", f"Searched for '{query}'")
+                output = f"🔍 Results for '{query}':\n\n"
                 for i, r in enumerate(result['results'], 1):
                     output += f"{i}. {r['title']}\n   {r['url']}\n"
-                    if r['snippet']:
-                        output += f"   {r['snippet'][:100]}...\n"
                 return output
             return f"❌ {result['error']}"
-
-        return "Please provide a URL to browse or a search query."
+        return "Please provide a URL or search query."
 
     def _handle_internet_toggle(self, text):
-        text_l = text.lower()
-        if 'enable' in text_l or 'turn on' in text_l:
-            self._log_activity("Internet", "Enabled internet access")
+        if 'enable' in text.lower() or 'turn on' in text.lower():
+            self._log_activity("Internet", "Enabled")
             return self.internet.enable()
-        if 'disable' in text_l or 'turn off' in text_l:
-            self._log_activity("Internet", "Disabled internet access")
+        if 'disable' in text.lower() or 'turn off' in text.lower():
+            self._log_activity("Internet", "Disabled")
             return self.internet.disable()
         return "Type 'enable internet' or 'disable internet'."
 
-    def _translate_to_command(self, text):
+    def _handle_summarize(self, text):
+        """Handle summarization requests."""
         text_l = text.lower()
-        if re.search(r'\b(commit|save)\s+(current\s+)?change', text_l):
-            return 'git add -A && git commit -m "Update"'
-        if re.search(r'\bpush\s+(to|my|the)\s+repo', text_l):
-            return 'git push'
-        if re.search(r'\bpull\s+(from|my|the)\s+repo', text_l):
-            return 'git pull'
-        if re.search(r'\b(git\s+)?status', text_l):
-            return 'git status'
-        if re.search(r'\b(git\s+)?log', text_l):
-            return 'git log --oneline -10'
-        if re.search(r'\b(git\s+)?branch', text_l):
-            return 'git branch'
-        if re.search(r'\b(make|create|new)\s+(a\s+)?folder', text_l):
-            name = self._extract_name(text)
-            return f'mkdir "{name}"' if name else 'mkdir new_folder'
-        if re.search(r'\b(remove|delete|rm)\s+(a\s+)?folder', text_l):
-            name = self._extract_name(text)
-            return f'rmdir "{name}"' if name else 'rmdir new_folder'
-        if re.search(r'\blist\s+(all\s+)?files', text_l):
-            return 'dir'
-        if re.search(r'\blist\s+(all\s+)?folders', text_l):
-            return 'dir /ad'
-        if re.search(r'\b(clear|clean)\s+(the\s+)?screen', text_l):
-            return 'cls'
-        if re.search(r'\b(show|list)\s+(all\s+)?processes?', text_l):
-            return 'tasklist'
-        if re.search(r'\b(what.?s?\s+)?my\s+ip', text_l):
-            return 'ipconfig | findstr "IPv4"'
-        if re.search(r'\blist\s+(all\s+)?python\s+modules?', text_l):
-            return 'pip list'
-        return None
-
-    def _detect_command(self, text):
-        text_l = text.lower()
-        cmd = self._translate_to_command(text)
-        if cmd:
-            return ('terminal', cmd, {'translated': True})
-        direct_patterns = [r'^python\s+', r'^pip\s+', r'^git\s+', r'^dir\s+', r'^ls\s+', r'^mkdir\s+', r'^rmdir\s+', r'^cls\s*']
-        for pattern in direct_patterns:
-            if re.search(pattern, text_l):
-                return ('terminal', text, {})
-        if re.search(r'\b(run|execute)\s+(python\s+|[a-zA-Z_][\w]*\.py)', text_l):
-            return ('terminal', text, {})
-        if any(k in text_l for k in ['list', 'ls', 'dir', 'files']) and not any(k in text_l for k in ['delete', 'remove']):
-            return ('list', None, {})
-        if any(k in text_l for k in ['read', 'show', 'view', 'cat']):
-            m = self._extract_filename(text)
-            return ('read', m if m else text.split()[-1], {})
-        if any(k in text_l for k in ['delete', 'remove', 'rm', 'del']):
-            m = self._extract_filename(text) or self._extract_name(text)
-            return ('delete', m if m else text.split()[-1], {})
-        if any(k in text_l for k in ['edit', 'modify', 'change']):
-            m = self._extract_filename(text)
-            return ('edit', m, {})
-        if any(k in text_l for k in ['create', 'make', 'write', 'generate', 'new']):
-            m = self._extract_filename(text)
-            return ('create', m, {})
-        if any(k in text_l for k in ['enable internet', 'disable internet', 'turn on internet', 'turn off internet']):
-            return ('internet_toggle', None, {})
-        if re.search(r'(https?://[^\s]+)', text):
-            return ('browse', text, {})
-        if any(k in text_l for k in ['look up', 'search for', 'find', 'google', 'browse the web', 'web search']):
-            return ('browse', text, {})
-        return ('chat', None, {})
-
-    def _handle_create(self, text, filename):
-        if not filename:
-            topic = self._extract_name(text) or "New File"
-            filename = re.sub(r'[^\w\s-]', '', topic).replace(' ', '-') + '.md'
-        if not filename.endswith(('.md', '.txt', '.json')):
-            filename += '.md'
-        content = self._call_llm_with_memory(f"Write markdown content for: {filename}. Request: {text}")
-        if content.startswith("Error"):
-            content = f"# {filename.title()}\n\nDocument content."
-        result = self.fm.write(filename, content, overwrite=True)
-        if result['success']:
-            self._log_activity("File Created", f"{filename}")
-        return f"✅ {result['message']}" if result['success'] else f"❌ {result['error']}"
-
-    def _handle_read(self, filename):
-        if not filename or filename.lower() in ['files', 'all', 'list']:
-            result = self.fm.list()
-            items = '\n'.join(f"  [{i['type'][0]}] {i['name']}" for i in result.get('items', []))
-            return f"📁 Files:\n{items}" if items else "📁 Empty"
-        result = self.fm.read(filename)
-        if result['success']:
-            self._log_activity("File Read", filename)
-        return f"📄 {filename}:\n\n{result['content']}" if result['success'] else f"❌ {result['error']}"
-
-    def _handle_edit(self, text, filename):
-        if self._is_jarvis_self_edit(text):
-            return self._handle_self_edit_request(text)
-        if not filename:
-            return "Which file would you like me to edit? For example: 'edit src/agent.py change X to Y'"
-        m = self._extract_filename(text)
+        
+        # Extract style
+        style = 'concise'
+        if 'bullet' in text_l or 'quick' in text_l:
+            style = 'bullets'
+        elif 'mindmap' in text_l or 'map' in text_l:
+            style = 'mindmap'
+        
+        # Extract file/directory
+        m = re.search(r'(?:summarize|summary)\s+(?:all\s+)?(?:files?\s+)?(?:in\s+)?(?:the\s+)?([^\s]+)', text_l)
         if m:
-            filename = m
-        m = re.search(r'\b(change|replace)\s+["\']([^"\']+)["\']?\s+(?:to|with)\s+["\']([^"\']+)["\']', text, re.I)
-        if not m:
-            return 'What would you like to change? Format: \'edit "file.md" change "old" to "new"\''
-        old_text, new_text = m.group(2), m.group(3)
-        result = self.fm.edit(filename, old_text, new_text)
-        if result['success']:
-            self._log_activity("File Edited", f"{filename} - changed '{old_text}' to '{new_text}'")
-        return result['message'] if result['success'] else f"❌ {result['error']}"
-
-    def _handle_delete(self, filename):
-        if not filename:
-            return "Which file would you like me to delete?"
-        result = self.fm.delete(filename)
-        if result['success']:
-            self._log_activity("File Deleted", filename)
-        return result['message'] if result['success'] else f"❌ {result['error']}"
-
-    def _handle_list(self):
-        result = self.fm.list()
-        if result['success']:
-            items = '\n'.join(f"  [{i['type'][0]}] {i['name']}" for i in result.get('items', []))
-            return f"📁 Files:\n{items}" if items else "📁 Empty"
-        return f"❌ {result['error']}"
-
-    def _handle_terminal(self, command, translated=False):
-        cmd = command.strip()
-        result = self.te.execute(cmd)
-        if result['status'] == 'success':
-            self._log_activity("Terminal", f"{cmd} - {result['status']}")
-        output = ""
-        if result.get('cwd'):
-            output += f"📁 CWD: {result['cwd']}\n"
-        output += f"📟 Status: {result['status']} (exit: {result['exit_code']})\n"
-        output += f"⏱️ {result['duration_ms']}ms\n"
-        if translated:
-            output += f"🔄 {command}\n"
-        output += f"\n{'='*40}\n"
-        if result['stdout']:
-            output += result['stdout']
-        if result['stderr']:
-            output += f"\n⚠️ {result['stderr']}"
-        output += f"{'='*40}"
-        return output
-
-    def _handle_chat(self, text):
-        response = self._call_llm_with_memory(text)
-        self.history.append({"role": "user", "content": text})
-        self.history.append({"role": "assistant", "content": response})
-        self.memory.save_conversation(text, response)
-        return f"JARVIS: {response}"
+            target = m.group(1)
+        else:
+            # Check for quoted path
+            m = re.search(r'["\']([^"\']+)["\']', text)
+            target = m.group(1) if m else None
+        
+        # Directory summary
+        if any(k in text for k in ['folder', 'directory', 'all files', 'all notes']):
+            result = self.summarizer.summarize_directory(target, style=style)
+            if result['success']:
+                self._log_activity("Summarize", f"Directory: {result['files_summarized']} files -> {result['summary_file']}")
+                return f"✅ Summarized {result['files_summarized']} files → {result['summary_file']}\n\nSaved to: {result['summary_path']}"
+            return f"❌ {result.get('error', 'Could not summarize')}"
+        
+        # Single file summary
+        if target:
+            result = self.summarizer.summarize_file(target, style=style)
+            if result['success']:
+                self._log_activity("Summarize", f"{target} -> {result['summary_file']}")
+                return f"✅ Summarized: {result['summary_file']}\n\nTags: {' '.join(f'#{t}' for t in result.get('tags', []))}\n\nSaved to: {result['summary_path']}"
+            return f"❌ {result.get('error', 'Could not find file')}"
+        
+        # List existing summaries
+        if 'list' in text_l or 'show' in text_l:
+            result = self.summarizer.list_summaries()
+            if result['success']:
+                output = f"📋 Existing Summaries ({result['count']}):\n\n"
+                for s in result.get('summaries', []):
+                    output += f"  - {s['name']} ({s['size']} bytes)\n"
+                return output
+            return f"❌ {result.get('error', 'Error listing summaries')}"
+        
+        return "📝 Summarize commands:\n  'summarize [file.md]' — Summarize a single file\n  'summarize all files in [folder]' — Summarize directory\n  'summarize [file.md] as bullets' — Different styles"
 
     def _handle_learn(self, text):
         m = re.search(r'\b(remember|learn)\s+(?:that\s+)?(.+?)\s+(?:is|equals?)\s+(.+)', text, re.I)
@@ -340,12 +230,152 @@ Now, how may I assist you?"""
             return f"✅ Remember: my role = {value}"
         return "❌ Format: 'remember that [key] is [value]'"
 
+    def _detect_command(self, text):
+        text_l = text.lower()
+        
+        # Summarize commands
+        if any(k in text_l for k in ['summarize', 'summary', 'make a summary', 'create summary']):
+            return ('summarize', text, {})
+        
+        # Internet commands
+        if any(k in text_l for k in ['enable internet', 'disable internet']):
+            return ('internet_toggle', text, {})
+        if re.search(r'(https?://[^\s]+)', text):
+            return ('browse', text, {})
+        if any(k in text_l for k in ['look up', 'search for', 'find', 'google']):
+            return ('browse', text, {})
+        
+        # Terminal patterns
+        cmd = self._translate_to_command(text)
+        if cmd:
+            return ('terminal', cmd, {'translated': True})
+        direct_patterns = [r'^python\s+', r'^pip\s+', r'^git\s+', r'^dir\s+', r'^ls\s+', r'^mkdir\s+', r'^rmdir\s+', r'^cls\s*']
+        for pattern in direct_patterns:
+            if re.search(pattern, text_l):
+                return ('terminal', text, {})
+        
+        # File operations
+        if any(k in text_l for k in ['list', 'ls', 'dir', 'files']) and not any(k in text_l for k in ['delete', 'remove']):
+            return ('list', None, {})
+        if any(k in text_l for k in ['read', 'show', 'view', 'cat']):
+            m = self._extract_filename(text)
+            return ('read', m if m else text.split()[-1], {})
+        if any(k in text_l for k in ['delete', 'remove', 'rm', 'del']):
+            m = self._extract_filename(text) or self._extract_name(text)
+            return ('delete', m if m else text.split()[-1], {})
+        if any(k in text_l for k in ['edit', 'modify', 'change']):
+            m = self._extract_filename(text)
+            return ('edit', m, {})
+        if any(k in text_l for k in ['create', 'make', 'write', 'generate', 'new']):
+            m = self._extract_filename(text)
+            return ('create', m, {})
+        
+        # Learn commands
+        if re.search(r'\b(remember|learn|I\s+(?:am|work as))\s+', text, re.I):
+            return ('learn', text, {})
+        
+        return ('chat', None, {})
+
+    def _translate_to_command(self, text):
+        text_l = text.lower()
+        if re.search(r'\b(commit|save)\s+(current\s+)?change', text_l):
+            return 'git add -A && git commit -m "Update"'
+        if re.search(r'\bpush\s+', text_l):
+            return 'git push'
+        if re.search(r'\bpull\s+', text_l):
+            return 'git pull'
+        if re.search(r'\b(git\s+)?status', text_l):
+            return 'git status'
+        if re.search(r'\b(make|create|new)\s+(a\s+)?folder', text_l):
+            name = self._extract_name(text)
+            return f'mkdir "{name}"' if name else 'mkdir new_folder'
+        if re.search(r'\b(remove|delete|rm)\s+(a\s+)?folder', text_l):
+            name = self._extract_name(text)
+            return f'rmdir "{name}"' if name else 'rmdir new_folder'
+        if re.search(r'\b(what.?s?\s+)?my\s+ip', text_l):
+            return 'ipconfig | findstr "IPv4"'
+        if re.search(r'\b(clear|clean)\s+(the\s+)?screen', text_l):
+            return 'cls'
+        return None
+
+    def _handle_create(self, text, filename):
+        if not filename:
+            topic = self._extract_name(text) or "New File"
+            filename = re.sub(r'[^\w\s-]', '', topic).replace(' ', '-') + '.md'
+        if not filename.endswith(('.md', '.txt', '.json')):
+            filename += '.md'
+        content = self._call_llm_with_memory(f"Write markdown content for: {filename}. Request: {text}")
+        if content.startswith("Error"):
+            content = f"# {filename.title()}\n\nDocument content."
+        result = self.fm.write(filename, content, overwrite=True)
+        if result['success']:
+            self._log_activity("File", f"Created {filename}")
+        return f"✅ {result['message']}" if result['success'] else f"❌ {result['error']}"
+
+    def _handle_read(self, filename):
+        if not filename or filename.lower() in ['files', 'all', 'list']:
+            result = self.fm.list()
+            items = '\n'.join(f"  [{i['type'][0]}] {i['name']}" for i in result.get('items', []))
+            return f"📁 Files:\n{items}" if items else "📁 Empty"
+        result = self.fm.read(filename)
+        if result['success']:
+            self._log_activity("File", f"Read {filename}")
+        return f"📄 {filename}:\n\n{result['content']}" if result['success'] else f"❌ {result['error']}"
+
+    def _handle_edit(self, text, filename):
+        if self._is_jarvis_self_edit(text):
+            return self._handle_self_edit_request(text)
+        if not filename:
+            return "Which file? 'edit \"file.md\" change \"old\" to \"new\"'"
+        m = self._extract_filename(text)
+        if m:
+            filename = m
+        m = re.search(r'\b(change|replace)\s+["\']([^"\']+)["\']?\s+(?:to|with)\s+["\']([^"\']+)["\']', text, re.I)
+        if not m:
+            return 'Format: \'edit "file.md" change "old" to "new"\''
+        old_text, new_text = m.group(2), m.group(3)
+        result = self.fm.edit(filename, old_text, new_text)
+        if result['success']:
+            self._log_activity("File", f"Edited {filename}")
+        return result['message'] if result['success'] else f"❌ {result['error']}"
+
+    def _handle_delete(self, filename):
+        if not filename:
+            return "Which file to delete?"
+        result = self.fm.delete(filename)
+        if result['success']:
+            self._log_activity("File", f"Deleted {filename}")
+        return result['message'] if result['success'] else f"❌ {result['error']}"
+
+    def _handle_list(self):
+        result = self.fm.list()
+        if result['success']:
+            items = '\n'.join(f"  [{i['type'][0]}] {i['name']}" for i in result.get('items', []))
+            return f"📁 Files:\n{items}" if items else "📁 Empty"
+        return f"❌ {result['error']}"
+
+    def _handle_terminal(self, command, translated=False):
+        result = self.te.execute(command.strip())
+        if result['status'] == 'success':
+            self._log_activity("Terminal", f"{command[:50]}...")
+        output = f"📟 {result['status']} (exit: {result['exit_code']}) | {result['duration_ms']}ms\n"
+        if result['stdout']:
+            output += f"\n{result['stdout']}"
+        if result['stderr']:
+            output += f"\n⚠️ {result['stderr']}"
+        return output
+
+    def _handle_chat(self, text):
+        response = self._call_llm_with_memory(text)
+        self.history.append({"role": "user", "content": text})
+        self.history.append({"role": "assistant", "content": response})
+        self.memory.save_conversation(text, response)
+        return f"JARVIS: {response}"
+
     def process(self, user_input):
         user_input = user_input.strip()
         if not user_input:
-            return "Enter a command or question."
-        if re.search(r'\b(remember|learn|I\s+(?:am|work as))\s+', user_input, re.I):
-            return self._handle_learn(user_input)
+            return "Enter a command."
         op, target, params = self._detect_command(user_input)
         return {
             'create': lambda: self._handle_create(user_input, target),
@@ -356,11 +386,13 @@ Now, how may I assist you?"""
             'terminal': lambda: self._handle_terminal(target, params.get('translated', False)),
             'internet_toggle': lambda: self._handle_internet_toggle(user_input),
             'browse': lambda: self._handle_browse(user_input),
+            'summarize': lambda: self._handle_summarize(user_input),
+            'learn': lambda: self._handle_learn(user_input),
             'chat': lambda: self._handle_chat(user_input)
         }[op]()
 
 
 if __name__ == "__main__":
-    print("JARVIS: Commands: create/read/edit/delete/list, mkdir/rmdir, remember that..., browse [url], search [query]")
+    print("JARVIS: Commands: create/read/edit/delete/list, summarize, browse, search, remember...")
     while (cmd := input("\nYou: ")) and cmd.lower() not in ['exit', 'quit']:
         print(Agent().process(cmd))
