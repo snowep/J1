@@ -8,7 +8,7 @@ from pathlib import Path
 class Memory:
     """JARVIS Persistent Memory — With auto-indexing and self-learning."""
 
-    def __init__(self, memory_path='memory'):
+    def __init__(self, memory_path='.jarvis/memory'):
         project_root = os.path.dirname(os.path.dirname(__file__))
         self.memory_dir = os.path.normpath(os.path.join(project_root, memory_path))
         self.index_file = os.path.join(self.memory_dir, 'index.md')

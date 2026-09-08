@@ -7,7 +7,7 @@ from src.file_manager import FileManager
 class Summarizer:
     """JARVIS Summarizer — Extract knowledge and create summaries from workspace files."""
 
-    def __init__(self, summaries_path='summaries', workspace_path='workspace'):
+    def __init__(self, summaries_path='workspace/summaries', workspace_path='workspace'):
         project_root = os.path.dirname(os.path.dirname(__file__))
         self.summaries_dir = os.path.normpath(os.path.join(project_root, summaries_path))
         self.workspace_path = os.path.normpath(os.path.join(project_root, workspace_path))

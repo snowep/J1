@@ -8,9 +8,9 @@
     "max_tokens": 5000
   },
   "workspace": "workspace",
-  "memory_path": "memory",
+  "memory_path": ".jarvis/memory",
   "internet_path": "workspace/research",
-  "summaries_path": "summaries",
+  "summaries_path": "workspace/summaries",
   "conversation": {
     "max_history": 10
   },

@@ -1,6 +1,6 @@
 # User Facts
 
-*Last updated: 2026-09-08 18:16:38 UTC*
+*Last updated: 2026-09-08 19:39:54 UTC*
 
 ## my name
 
@@ -14,10 +14,6 @@ active
 
 active
 
-## testing mode
-
-active
-
 ## project
 
 JARVIS OS
@@ -25,4 +21,8 @@ JARVIS OS
 ## phase
 
 7
+
+## test_pref
+
+phase2
 

@@ -1,19 +1,22 @@
 # Memory Index
 
-*Auto-generated index of all memory files. Updated on startup and after changes.*
+*Last updated: 2026-09-08 19:39:54 UTC*
 
 ---
-
-## User Preferences
-- [facts_user.md](facts_user.md) → Key facts about the user (name, role, preferences)
 
 ## Conversations
-- [conversation_2025-01-15.md](conversation_2025-01-15.md) — Daily conversation log
-- [conversation_2025-01-16.md](conversation_2025-01-16.md) — Daily conversation log
+
+- [[conversation_2026-09-08.md]] - Conversation 2026-09-08
+
+## Facts
+
+- [[facts_user.md]] - Facts User
 
 ## Decisions
-- [decisions.md](decisions.md) — Autonomous task decisions and outcomes
 
----
+- [[decisions.md]] - Decisions
 
-*Last updated: 2025-01-15T10:30:00Z*
+## Other
+
+- [[README.md]] - Readme
+

@@ -1,4 +1,4 @@
-import json, os, re, requests, subprocess, subprocess
+import json, os, re, requests, subprocess
 from datetime import datetime
 from src.file_manager import FileManager
 from src.terminal_executor import TerminalExecutor
