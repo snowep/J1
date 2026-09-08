@@ -91,6 +91,26 @@ Now, how may I assist you?"""
                 return w
         return None
 
+    def _is_jarvis_self_edit(self, text):
+        """Check if user is asking about JARVIS editing its own code."""
+        text_l = text.lower()
+        self_refs = ['your code', 'your own code', 'edit yourself', 'edit your code', 
+                     'can you edit yourself', 'can you edit your own', 'change your code',
+                     'modify yourself', 'modify your code']
+        return any(ref in text_l for ref in self_refs)
+
+    def _handle_self_edit_request(self, text):
+        """Handle requests about JARVIS editing its own code."""
+        text_l = text.lower()
+        
+        # Check for affirmation or negation
+        if any(k in text_l for k in ['can you', 'would you', 'could you', 'do you']):
+            # User is asking if JARVIS can do it
+            return "Certainly. I can edit my own code files. Which file would you like me to change? For example: 'edit src/agent.py change X to Y'"
+        
+        # User is making a request without specifics
+        return "I'd be happy to edit my code. What would you like me to change? Please tell me which file and what to change."
+
     def _translate_to_command(self, text):
         text_l = text.lower()
         if re.search(r'\b(commit|save)\s+(current\s+)?change', text_l):
@@ -175,21 +195,25 @@ Now, how may I assist you?"""
         return f"❌ {result['error']}"
 
     def _handle_edit(self, text, filename):
+        # First check if this is about JARVIS editing its own code
+        if self._is_jarvis_self_edit(text):
+            return self._handle_self_edit_request(text)
+        
         if not filename:
-            return "❌ Specify file to edit"
+            return "Which file would you like me to edit? For example: 'edit src/agent.py change X to Y'"
         m = self._extract_filename(text)
         if m:
             filename = m
         m = re.search(r'\b(change|replace)\s+["\']([^"\']+)["\']?\s+(?:to|with)\s+["\']([^"\']+)["\']', text, re.I)
         if not m:
-            return '❌ Format: \'edit "file.md" change "old" to "new"\''
+            return 'What would you like to change in this file? Format: \'edit "file.md" change "old" to "new"\''
         old_text, new_text = m.group(2), m.group(3)
         result = self.fm.edit(filename, old_text, new_text)
         return result['message'] if result['success'] else f"❌ {result['error']}"
 
     def _handle_delete(self, filename):
         if not filename:
-            return "❌ Specify file to delete"
+            return "Which file would you like me to delete?"
         result = self.fm.delete(filename)
         return result['message'] if result['success'] else f"❌ {result['error']}"
 
@@ -226,14 +250,12 @@ Now, how may I assist you?"""
         return f"JARVIS: {response}"
 
     def _handle_learn(self, text):
-        # Pattern: "remember that [key] is [value]"
         m = re.search(r'\b(remember|learn)\s+(?:that\s+)?(.+?)\s+(?:is|equals?)\s+(.+)', text, re.I)
         if m:
             key = m.group(2).strip()
             value = m.group(3).strip().rstrip('.')
             self.memory.save_user_preference(key, value)
             return f"✅ Remember: {key} = {value}"
-        # Pattern: "I work as [value]"
         m = re.search(r'\bI\s+(?:am|work as)\s+(.+)', text, re.I)
         if m:
             value = m.group(1).strip().rstrip('.')
@@ -245,7 +267,6 @@ Now, how may I assist you?"""
         user_input = user_input.strip()
         if not user_input:
             return "Enter a command or question."
-        # Check for learn patterns (remember, learn, I am, I work as)
         if re.search(r'\b(remember|learn|I\s+(?:am|work as))\s+', user_input, re.I):
             return self._handle_learn(user_input)
         op, target, params = self._detect_command(user_input)
