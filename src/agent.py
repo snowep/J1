@@ -3,6 +3,7 @@ from datetime import datetime
 from src.file_manager import FileManager
 from src.terminal_executor import TerminalExecutor
 from src.memory import Memory, AutonomousPlanner
+from src.skills import SkillManager
 from src.internet import Internet
 from src.summarizer import Summarizer
 
@@ -37,6 +38,9 @@ class Agent:
         
         # Load skills and capabilities from .jarvis/
         self.capabilities = self._load_capabilities()
+        
+        # Load skill manager for model-invokable skills
+        self.skill_manager = SkillManager()
 
     def _log_activity(self, operation, details):
         timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
@@ -341,6 +345,31 @@ Use this to reference stored notes and facts."""
         
         return output
 
+    def _handle_skill(self, name, params):
+        """Handle skill invocation or listing."""
+        if params.get('action') == 'list':
+            skills = self.skill_manager.list_skills()
+            if not skills:
+                return "No skills loaded. Check .jarvis/skills/*.md"
+            output = "🎯 **Available Skills** (from .jarvis/skills/*.md):\n\n"
+            for skill in skills:
+                skill_obj = self.skill_manager.get_skill(skill)
+                desc = skill_obj.get('description', '') if skill_obj else ''
+                output += f"  - **{skill}**: {desc}\n"
+            return output
+        
+        # Run the skill
+        skill_name = name
+        skill = self.skill_manager.get_skill(skill_name)
+        if not skill:
+            return f"❌ Skill not found: {skill_name}. Available: {', '.join(self.skill_manager.list_skills())}"
+        
+        result = self.skill_manager.execute_skill(skill_name, {})
+        if result['success']:
+            self._log_activity("Skill", f"Invoked {skill_name}: {result.get('output', '')[:50]}")
+            return f"🎯 **Skill '{skill_name}' executed**:\n\n{result.get('output', '')}"
+        return f"❌ Skill '{skill_name}' failed: {result.get('error', '')}"
+
     def _handle_learn(self, text):
         m = re.search(r'\b(remember|learn)\s+(?:that\s+)?(.+?)\s+(?:is|equals?)\s+(.+)', text, re.I)
         if m:
@@ -362,6 +391,22 @@ Use this to reference stored notes and facts."""
 
         if self._is_autonomous_task(text):
             return ('autonomous', text, {})
+
+        # Skill detection: explicit skill invocation or listing
+        skill_match = re.search(r'\b(?:use|invoke|run|execute)\s+(?:the\s+)?(?:skill\s+)?(.+?)(?:\s+skill)?\s*$', text, re.I)
+        if skill_match:
+            # Try direct match, then normalize spaces to underscores
+            raw = skill_match.group(1).strip()
+            candidates = [raw.lower().replace(' ', '_'), raw.lower().replace(' ', '-')]
+            for candidate in candidates:
+                if candidate in self.skill_manager.list_skills():
+                    return ('skill', candidate, {'action': 'run'})
+            # Try partial match: check if any skill name is contained in the text
+            for sk in self.skill_manager.list_skills():
+                if sk in raw.lower().replace(' ', '_'):
+                    return ('skill', sk, {'action': 'run'})
+        if any(k in text_l for k in ['list skills', 'available skills', 'show skills', 'what skills', 'what can you do']):
+            return ('skill', None, {'action': 'list'})
 
         if any(k in text_l for k in ['summarize', 'summary']):
             return ('summarize', text, {})
@@ -514,6 +559,7 @@ Use this to reference stored notes and facts."""
             'autonomous': lambda: self._handle_autonomous(user_input),
             'learn': lambda: self._handle_learn(user_input),
             'capabilities': lambda: self._handle_capabilities(),
+            'skill': lambda: self._handle_skill(target, params),
             'chat': lambda: self._handle_chat(user_input)
         }[op]()
 

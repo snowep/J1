@@ -1,88 +1,55 @@
-# JARVIS Skills Registry
+# JARVIS Skills Index
 
-*Each skill describes a capability JARVIS can invoke. Skills are loaded from this file at startup.*
-
----
-
-## File Operations
-
-**Name**: `file_crud`
-**Trigger**: "create X", "read X", "edit X", "delete X", "list files"
-**Description**: Create, read, edit, delete, and list files in the workspace.
-- `create file.md about [topic]` — create a markdown file with LLM-generated content
-- `read file.md` — display file contents
-- `edit "file.md" change "old" to "new"` — replace text in a file
-- `delete file.md` — remove a file
-- `list files` — show workspace contents
-
-**Implementation**: `src/file_manager.py` → `FileManager` class
+*Each skill is a separate `.md` file in this directory. Skills are loaded at startup by `SkillManager`.*
 
 ---
 
-## Terminal Execution
+## Available Skills
 
-**Name**: `terminal_exec`
-**Trigger**: "run X", "execute X", or any direct shell command (git, python, pip, mkdir, etc.)
-**Description**: Execute terminal commands with cwd locked to the workspace.
-- Requires approval before execution (configurable in settings.md)
-- Commands are logged to `workspace/terminal_log.json`
-- Supports: git, python, pip, mkdir, rmdir, ipconfig, cls, tasklist, etc.
-
-**Implementation**: `src/terminal_executor.py` → `TerminalExecutor` class
+| Skill | File | Description |
+|-------|------|-------------|
+| `hello_world` | [hello_world.md](hello_world.md) | Print a greeting message |
+| `file_crud` | [file_crud.md](file_crud.md) | Create, read, edit, delete, list files |
+| `summarize` | [summarize.md](summarize.md) | Summarize a file or list summaries |
+| `code_writer` | [code_writer.md](code_writer.md) | Write Python code to a file |
 
 ---
 
-## Internet Access
+## How to Add a New Skill
 
-**Name**: `web_access`
-**Trigger**: "browse [url]", "search for [query]", "look up X", "google X"
-**Description**: Fetch web pages and search the web.
-- Requires approval before browsing (configurable in settings.md)
-- Can save research to `workspace/research/`
-- Uses DuckDuckGo HTML scraping for search (no API key required)
+1. Create a new `.md` file in `.jarvis/skills/`
+2. Add YAML frontmatter with `name` and `description`
+3. Add instructions and a Python code block
+4. Restart JARVIS — the skill is auto-detected
 
-**Implementation**: `src/internet.py` → `Internet` class
+### Skill File Template
+
+```markdown
+---
+name: my_skill
+description: What this skill does
+---
+
+# My Skill
+
+## Instructions
+
+When to use and how it works.
+
+## Parameters
+
+- `param1` (required): Description
+- `param2` (optional): Description
+
+## Code
+
+```python
+def run(param1, param2="default", **kwargs):
+    """Execute the skill."""
+    return f"Result: {param1}"
+```
+```
 
 ---
 
-## Memory & Learning
-
-**Name**: `memory_ops`
-**Trigger**: "remember that X is Y", "I am X", "I work as X"
-**Description**: Store facts, preferences, and conversation summaries.
-- `remember that [key] is [value]` — save a fact to memory
-- `I work as a developer` — learns user role
-- Automatically updates `memory/index.md` and `memory/facts_user.md`
-- Loads relevant memory into system prompt on startup
-
-**Implementation**: `src/memory.py` → `Memory` class
-
----
-
-## Summarization
-
-**Name**: `summarize_docs`
-**Trigger**: "summarize [file]", "summarize all files in [folder]", "list summaries"
-**Description**: Read files and produce concise summaries in various styles.
-- `summarize file.md` — concise summary
-- `summarize file.md as bullets` — bullet-point style
-- `summarize file.md as mindmap` — mind-map style
-- `summarize all files in folder` — combined summary
-- `list summaries` — show all generated summaries
-- Saves to `summaries/summary_*.md`
-
-**Implementation**: `src/summarizer.py` → `Summarizer` class
-
----
-
-## Autonomous Planning
-
-**Name**: `auto_plan`
-**Trigger**: "organize my notes", "write a script that X", "learn about X and create Y", "setup project"
-**Description**: Break high-level goals into concrete multi-step actions and execute them.
-- Creates a plan using the LLM
-- Executes read/write/run/search/remember steps
-- Recovers from partial failures via alternative strategies
-- Logs decisions to `memory/decisions.md`
-
-**Implementation**: `src/memory.py` → `AutonomousPlanner` class
+*Skills are model-invokable via `{"type": "skill", "skill": "name", "params": {...}}`.*
