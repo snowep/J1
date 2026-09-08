@@ -247,6 +247,38 @@
       "status": "success",
       "output_length": 1,
       "duration_ms": 30
+    },
+    {
+      "timestamp": "2026-09-08T17:54:02.256927Z",
+      "command": "dir",
+      "cwd": "D:\\Project\\OS\\workspace",
+      "status": "success",
+      "output_length": 574,
+      "duration_ms": 48
+    },
+    {
+      "timestamp": "2026-09-08T17:54:02.520340Z",
+      "command": "mkdir \"Make\"",
+      "cwd": "D:\\Project\\OS\\workspace",
+      "status": "failed",
+      "output_length": 45,
+      "duration_ms": 45
+    },
+    {
+      "timestamp": "2026-09-08T17:54:02.687920Z",
+      "command": "ipconfig | findstr \"IPv4\"",
+      "cwd": "D:\\Project\\OS\\workspace",
+      "status": "success",
+      "output_length": 104,
+      "duration_ms": 165
+    },
+    {
+      "timestamp": "2026-09-08T17:54:02.725240Z",
+      "command": "cls",
+      "cwd": "D:\\Project\\OS\\workspace",
+      "status": "success",
+      "output_length": 1,
+      "duration_ms": 24
     }
   ]
 }
