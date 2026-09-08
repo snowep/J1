@@ -1,18 +1,6 @@
 # Memory Index
 
-*Last updated: 2026-09-08 18:30:02 UTC*
+*Last updated: 2026-09-08 19:12:25 UTC*
 
 ---
-
-## Conversations
-
-- [[conversation_2026-09-08.md]] - Conversation 2026-09-08
-
-## Facts
-
-- [[facts_user.md]] - Facts User
-
-## Decisions
-
-- [[decisions.md]] - Decisions
 

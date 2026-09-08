@@ -10,9 +10,15 @@ from src.summarizer import Summarizer
 class Agent:
     """JARVIS Agent — Self-learning autonomous assistant."""
 
-    def __init__(self, config_path='config.json'):
+    def __init__(self, config_path='workspace/.jarvis/config.json'):
+        if not os.path.exists(config_path):
+            config_path = 'config.json'  # Fallback to legacy location
         with open(config_path, 'r') as f:
             self.config = json.load(f)
+        
+        # Load JARVIS brain configuration from .jarvis/
+        self.jarvis_brain = self._load_jarvis_brain()
+        
         self.fm = FileManager()
         self.te = TerminalExecutor(
             workspace_path=self.config.get('workspace', 'workspace'),
@@ -21,13 +27,16 @@ class Agent:
         )
         self.internet = Internet(research_path=self.config.get('internet_path', 'workspace/research'))
         self.summarizer = Summarizer(summaries_path=self.config.get('summaries_path', 'summaries'))
-        self.memory = Memory(memory_path=self.config.get('memory_path', 'memory'))
+        self.memory = Memory(memory_path=self.config.get('memory_path', 'workspace/.jarvis/memory'))
         self.planner = AutonomousPlanner(self)
         self.history = []
         self.max_history = self.config.get('conversation', {}).get('max_history', 10)
         self.llm = self.config.get('llm', {})
         self.memory_context = self.memory.get_context_for_llm()
-        self.log_file = 'log.md'
+        self.log_file = 'workspace/log.md'
+        
+        # Load skills and capabilities from .jarvis/
+        self.capabilities = self._load_capabilities()
 
     def _log_activity(self, operation, details):
         timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
@@ -37,6 +46,82 @@ class Agent:
                 f.write(entry)
         except:
             pass
+
+    def _load_jarvis_brain(self):
+        """Scan and load .jarvis/ directory configuration."""
+        brain_path = 'workspace/.jarvis'
+        brain = {
+            'settings': {'raw': ''},
+            'skills': {'raw': ''},
+            'memory_index': '',
+            'rules': ''
+        }
+        
+        # Load settings.md
+        settings_path = os.path.join(brain_path, 'settings.md')
+        if os.path.exists(settings_path):
+            try:
+                with open(settings_path, 'r', encoding='utf-8') as f:
+                    brain['settings']['raw'] = f.read()
+            except:
+                pass
+        
+        # Load memory index
+        memory_index_path = os.path.join(brain_path, 'memory', 'index.md')
+        if os.path.exists(memory_index_path):
+            try:
+                with open(memory_index_path, 'r', encoding='utf-8') as f:
+                    brain['memory_index'] = f.read()
+            except:
+                pass
+        
+        # Load skills
+        skills_path = os.path.join(brain_path, 'skills', 'skills.md')
+        if os.path.exists(skills_path):
+            try:
+                with open(skills_path, 'r', encoding='utf-8') as f:
+                    brain['skills']['raw'] = f.read()
+            except:
+                pass
+        else:
+            brain['skills']['raw'] = ''
+        
+        # Load rules
+        rules_path = os.path.join(brain_path, 'rules', 'rules.md')
+        if os.path.exists(rules_path):
+            try:
+                with open(rules_path, 'r', encoding='utf-8') as f:
+                    brain['rules'] = f.read()
+            except:
+                pass
+        else:
+            brain['rules'] = ''
+        
+        return brain
+
+    def _load_capabilities(self):
+        """Extract list of available skills from .jarvis/skills/skills.md."""
+        capabilities = []
+        skills_text = self.jarvis_brain.get('skills', {}).get('raw', '')
+        
+        # Parse skill names from skills.md
+        import re
+        skill_sections = re.findall(r'## (\w+ \w+)', skills_text)
+        for section in skill_sections:
+            capabilities.append(section.strip())
+        
+        # Also check for skill entries in the format **Name**: `skill_name`
+        skill_entries = re.findall(r'\*\*([^\*]+)\*\*\s*:\s*`([^`]+)`', skills_text)
+        for name, skill_id in skill_entries:
+            if name.strip() not in capabilities:
+                capabilities.append(name.strip())
+        
+        # Fallback: extract from headers
+        if not capabilities:
+            headers = re.findall(r'^## (.+)$', skills_text, re.MULTILINE)
+            capabilities.extend([h.strip() for h in headers])
+        
+        return list(set(capabilities))  # Remove duplicates
 
     def _call_llm(self, prompt):
         try:
@@ -240,6 +325,23 @@ Use this to reference stored notes and facts."""
 
         return "📝 Usage: 'summarize [file]', 'summarize all files in [folder]', 'list summaries'"
 
+    def _handle_capabilities(self):
+        """Show all loaded capabilities from .jarvis/skills/skills.md."""
+        if not self.capabilities:
+            return "No capabilities loaded. Check .jarvis/skills/skills.md"
+        
+        output = "🧠 **JARVIS Capabilities** (loaded from .jarvis/skills/skills.md):\n\n"
+        for i, cap in enumerate(sorted(self.capabilities), 1):
+            output += f"{i}. {cap}\n"
+        
+        # Also show brain status
+        output += f"\n📁 Brain: workspace/.jarvis/"
+        output += f"\n📝 Settings: {len(self.jarvis_brain.get('settings', {}).get('raw', ''))} chars"
+        output += f"\n🧠 Skills: {len(self.capabilities)} loaded"
+        output += f"\n💾 Memory: {len(self.jarvis_brain.get('memory_index', ''))} chars"
+        
+        return output
+
     def _handle_learn(self, text):
         m = re.search(r'\b(remember|learn)\s+(?:that\s+)?(.+?)\s+(?:is|equals?)\s+(.+)', text, re.I)
         if m:
@@ -295,6 +397,8 @@ Use this to reference stored notes and facts."""
             return ('create', m, {})
         if re.search(r'\b(remember|learn|I\s+(?:am|work as))\s+', text, re.I):
             return ('learn', text, {})
+        if any(k in text_l for k in ['what can you do', 'capabilities', 'what are your skills', 'list skills', 'help']):
+            return ('capabilities', None, {})
 
         return ('chat', None, {})
 
@@ -410,6 +514,7 @@ Use this to reference stored notes and facts."""
             'summarize': lambda: self._handle_summarize(user_input),
             'autonomous': lambda: self._handle_autonomous(user_input),
             'learn': lambda: self._handle_learn(user_input),
+            'capabilities': lambda: self._handle_capabilities(),
             'chat': lambda: self._handle_chat(user_input)
         }[op]()
 
