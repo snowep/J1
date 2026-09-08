@@ -8,6 +8,7 @@
     "max_tokens": 5000
   },
   "workspace": "workspace",
+  "memory_path": "memory",
   "conversation": {
     "max_history": 10
   },
@@ -17,6 +18,7 @@
     "file_edit": "auto",
     "file_append": "auto",
     "file_delete": "auto",
-    "file_list": "auto"
+    "file_list": "auto",
+    "terminal": "ask"
   }
 }
