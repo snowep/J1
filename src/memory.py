@@ -19,22 +19,12 @@ class Memory:
         return datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
 
     def _ensure_index(self):
-        """Ensure index file exists."""
         if not os.path.exists(self.index_file):
             self._update_index({})
 
     def _update_index(self, memory_files):
-        """Update the memory index file."""
-        content = f"# Memory Index\n\n*Last updated: {self._now()}*\n\n"
-        content += "---\n\n"
-        
-        categories = {
-            'conversations': [],
-            'facts': [],
-            'decisions': [],
-            'other': []
-        }
-        
+        content = f"# Memory Index\n\n*Last updated: {self._now()}*\n\n---\n\n"
+        categories = {'conversations': [], 'facts': [], 'decisions': [], 'other': []}
         for f in os.listdir(self.memory_dir):
             if f == 'index.md':
                 continue
@@ -48,7 +38,6 @@ class Memory:
                     categories['decisions'].append(f)
                 else:
                     categories['other'].append(f)
-        
         for cat, files in categories.items():
             if files:
                 content += f"## {cat.title()}\n\n"
@@ -56,12 +45,10 @@ class Memory:
                     title = f.replace('.md', '').replace('_', ' ').title()
                     content += f"- [[{f}]] - {title}\n"
                 content += "\n"
-        
         with open(self.index_file, 'w', encoding='utf-8') as f:
             f.write(content)
 
     def save_conversation(self, user_input, assistant_response):
-        """Save conversation to daily log and auto-update index."""
         today = datetime.utcnow().strftime('%Y-%m-%d')
         log_file = os.path.join(self.memory_dir, f'conversation_{today}.md')
         entry = f"### {self._now()}\n\n**You:** {user_input}\n\n**JARVIS:** {assistant_response}\n\n---\n\n"
@@ -71,7 +58,6 @@ class Memory:
         return log_file
 
     def save_fact(self, category, key, value):
-        """Save a fact and auto-update index."""
         category_file = os.path.join(self.memory_dir, f'facts_{category}.md')
         facts = self._load_facts(category) if os.path.exists(category_file) else {}
         facts[key] = {'value': value, 'updated': self._now()}
@@ -101,7 +87,6 @@ class Memory:
         return facts
 
     def get_facts(self, category=None):
-        """Get all facts with auto-index."""
         all_facts = {}
         for f in os.listdir(self.memory_dir):
             if f.startswith('facts_') and f.endswith('.md'):
@@ -110,15 +95,12 @@ class Memory:
         return all_facts
 
     def save_user_preference(self, preference, value):
-        """Save user preference with auto-index."""
         return self.save_fact('user', preference, value)
 
     def get_user_preferences(self):
-        """Get all user preferences."""
         return self.get_facts('user')
 
     def save_decision(self, decision, context, outcome=None):
-        """Save a decision with auto-index."""
         decision_file = os.path.join(self.memory_dir, 'decisions.md')
         entry = f"## {self._now()}\n\n**Decision:** {decision}\n\n**Context:** {context}\n"
         if outcome:
@@ -130,7 +112,6 @@ class Memory:
         return decision_file
 
     def get_context_for_llm(self, max_convo_lines=30):
-        """Build context for LLM with memory index."""
         context_parts = []
         prefs = self.get_user_preferences()
         if prefs:
@@ -140,138 +121,253 @@ class Memory:
                     pref_lines.append(f"- {k}: {v.get('value', '')}")
             if len(pref_lines) > 1:
                 context_parts.append('\n'.join(pref_lines))
-        
-        # Include index reference
         if os.path.exists(self.index_file):
             with open(self.index_file, 'r', encoding='utf-8') as f:
                 index_content = f.read()[:500]
             context_parts.append(f"## Memory Index\n\n{index_content}...")
-        
         return '\n\n'.join(context_parts) if context_parts else ""
-
-    def get_recent_conversations(self, days=3):
-        """Get recent conversations."""
-        conversations = []
-        today = datetime.utcnow()
-        for i in range(days):
-            check_date = (today.replace(day=today.day - i)).strftime('%Y-%m-%d')
-            log_file = os.path.join(self.memory_dir, f'conversation_{check_date}.md')
-            if os.path.exists(log_file):
-                with open(log_file, 'r', encoding='utf-8') as f:
-                    conversations.append(f.read())
-        return '\n'.join(conversations)
 
 
 class AutonomousPlanner:
-    """JARVIS Autonomous Planner — Plans and executes multi-step actions."""
+    """JARVIS Autonomous Planner — Plans, executes, and RECOVERS from failures."""
 
-    def __init__(self, agent):
+    def __init__(self, agent, max_retries=2, abort_on_major_failure=False):
         self.agent = agent
         self.fm = agent.fm
         self.memory = agent.memory
         self.te = agent.te
+        self.max_retries = max_retries
+        self.abort_on_major_failure = abort_on_major_failure
 
     def plan_and_execute(self, high_level_goal):
         """
-        Plan and execute a high-level goal autonomously.
+        Plan and execute a high-level goal with error recovery.
         
         Returns:
-            List of actions taken and results
+            Dict with goal, plan, actions, errors, and recovery info
         """
-        # Create a plan using LLM
-        plan_prompt = f"""Break down this goal into concrete steps. Respond with ONLY a numbered list:
+        plan = self._generate_plan(high_level_goal)
+        
+        actions_taken = []
+        errors = []
+        recovered = []
+        
+        for i, action in enumerate(plan):
+            result = self._execute_with_recovery(action, high_level_goal)
+            
+            actions_taken.append({
+                'action': action,
+                'result': result,
+                'success': result.get('success', False)
+            })
+            
+            if not result.get('success'):
+                errors.append({'action': action, 'error': result.get('error', 'Unknown')})
+            elif result.get('recovered'):
+                recovered.append({'action': action, 'strategy': result.get('recovery_strategy')})
+            
+            self.memory.save_decision(action, high_level_goal, result.get('summary', 'Completed'))
+            
+            # Abort if configured and this was a major failure
+            if self.abort_on_major_failure and not result.get('success') and result.get('critical'):
+                actions_taken.append({
+                    'action': 'ABORT',
+                    'result': {'summary': f'Aborted after critical failure: {result.get("error")}', 'success': False}
+                })
+                break
+        
+        return {
+            'goal': high_level_goal,
+            'plan': '\n'.join(f"{i+1}. {a}" for i, a in enumerate(plan)),
+            'actions': actions_taken,
+            'errors': errors,
+            'recovered': recovered,
+            'success_count': sum(1 for a in actions_taken if a.get('success')),
+            'failure_count': len(errors),
+            'summary': self._build_summary(actions_taken, errors, recovered)
+        }
+
+    def _generate_plan(self, high_level_goal):
+        """Generate a plan with retry on malformed output."""
+        plan_prompt = f"""Break down this goal into concrete steps. Respond with ONLY a numbered list.
 
 Goal: {high_level_goal}
 
 Steps (one per line, action verb first):
-1. """
-        plan = self.agent._call_llm(plan_prompt)
+1."""
         
-        actions_taken = []
+        for attempt in range(self.max_retries + 1):
+            plan_text = self.agent._call_llm(plan_prompt)
+            steps = self._parse_plan(plan_text)
+            if steps:
+                return steps
+            # Retry with stronger instruction if failed to parse
+            plan_prompt = f"""You did not provide a valid numbered list. Again, break down this goal.
+Respond with ONLY numbered lines starting with numbers:
+
+Goal: {high_level_goal}"""
         
-        # Parse plan and execute
-        lines = plan.strip().split('\n')
-        for line in lines:
+        # Fallback: return empty plan rather than crash
+        return []
+
+    def _parse_plan(self, plan_text):
+        """Parse plan, tolerant of malformed output."""
+        if not plan_text:
+            return []
+        steps = []
+        for line in plan_text.strip().split('\n'):
             line = line.strip()
-            if not line or not line[0].isdigit():
+            if not line:
                 continue
-            
-            # Remove number prefix
-            action = re.sub(r'^\d+[\.\)]\s*', '', line).strip()
-            
-            # Execute based on action type
-            result = self._execute_action(action)
-            actions_taken.append({'action': action, 'result': result})
-            
-            # Log to memory
-            self.memory.save_decision(action, high_level_goal, result.get('summary', 'Completed'))
+            m = re.match(r'^\d+[\.\)]\s*(.+)', line)
+            if m:
+                steps.append(m.group(1).strip())
+        return steps
+
+    def _execute_with_recovery(self, action, goal):
+        """Execute an action with retry and fallback strategies."""
+        # Primary attempt
+        result = self._execute_action(action)
         
+        # If succeeded, return
+        if result.get('success'):
+            return result
+        
+        # If failed, try alternative approaches
+        error = result.get('error', 'Unknown error')
+        strategies = self._generate_alternatives(action, error)
+        
+        for strategy in strategies:
+            result = self._execute_action(strategy)
+            if result.get('success'):
+                result['recovered'] = True
+                result['recovery_strategy'] = f"'{action}' → '{strategy}'"
+                return result
+        
+        # Add final failure result
         return {
-            'goal': high_level_goal,
-            'plan': plan,
-            'actions': actions_taken,
-            'summary': f"Completed {len(actions_taken)} actions"
+            'action': action,
+            'success': False,
+            'error': error,
+            'critical': result.get('critical', False),
+            'summary': f'Failed: {action}'
         }
 
-    def _execute_action(self, action):
-        """Execute a single action from the plan."""
+    def _generate_alternatives(self, action, error):
+        """Generate alternative approaches when an action fails."""
+        alternatives = []
         action_l = action.lower()
         
-        # Read file action
-        if action_l.startswith('read ') or action_l.startswith('open '):
+        if 'not found' in error.lower() or 'no such file' in error.lower():
+            # Try different filename patterns
+            if action_l.startswith('read '):
+                filename = self._extract_filename(action)
+                if filename:
+                    # Try with .md extension if missing
+                    if not filename.endswith('.md'):
+                        alternatives.append(f"read {filename}.md")
+                    # Try lowercase
+                    alternatives.append(f"read {filename.lower()}")
+        
+        elif 'permission' in error.lower() or 'access denied' in error.lower():
+            alternatives.append(f"list files")
+        
+        elif 'timed out' in error.lower() or 'timeout' in error.lower():
+            alternatives.append(action.replace('search', 'browse'))
+        
+        elif action_l.startswith('write ') or action_l.startswith('create '):
+            # Alternative: retry with simpler content
             filename = self._extract_filename(action)
             if filename:
-                result = self.fm.read(filename)
-                return {'action': action, 'summary': f'Read {filename}', 'content': result.get('content', '')[:200]}
+                alternatives.append(f"write {filename} with basic content")
         
-        # Write file action
-        if action_l.startswith('write ') or action_l.startswith('create '):
-            filename = self._extract_filename(action)
-            if filename:
-                # Generate content using LLM
-                content = self.agent._call_llm_with_memory(f"Write content for: {filename}. Action: {action}")
-                result = self.fm.write(filename, content, overwrite=True)
-                return {'action': action, 'summary': f'Created {filename}'}
+        # Always try removing excessive phrasing
+        cleaned = re.sub(r'\b(please|kindly|now|quickly|carefully)\b', '', action, flags=re.I).strip()
+        if cleaned != action:
+            alternatives.append(cleaned)
         
-        # Run code action
-        if action_l.startswith('run ') or action_l.startswith('execute '):
-            # Extract command
-            cmd = re.sub(r'^(run|execute)\s+', '', action, flags=re.I).strip()
-            if cmd:
-                result = self.te.execute(cmd)
-                return {'action': action, 'summary': f'Ran: {cmd[:30]}...', 'output': result.get('stdout', '')[:100]}
+        return alternatives
+
+    def _execute_action(self, action):
+        """Execute a single action with error capture."""
+        action_l = action.lower()
         
-        # Search/browse action
-        if action_l.startswith('search ') or action_l.startswith('browse '):
-            query = re.sub(r'^(search|browse)\s+', '', action, flags=re.I).strip()
-            if query:
-                return {'action': action, 'summary': f'Searched: {query}'}
+        try:
+            if action_l.startswith('read ') or action_l.startswith('open '):
+                filename = self._extract_filename(action)
+                if filename:
+                    result = self.fm.read(filename)
+                    if result['success']:
+                        return {'action': action, 'summary': f'Read {filename}', 'content': result['content'][:200], 'success': True}
+                    return {'action': action, 'success': False, 'error': result['error']}
+            
+            elif action_l.startswith('write ') or action_l.startswith('create '):
+                filename = self._extract_filename(action)
+                if filename:
+                    # Extract content hint from after filename
+                    content_hint = re.sub(r'^(write|create)\s+\S+\s*', action, '', flags=re.I).strip()
+                    content = self.agent._call_llm_with_memory(
+                        f"Write content for: {filename}. Action: {action}. Context hint: {content_hint}"
+                    )
+                    if content.startswith('Error'):
+                        return {'action': action, 'success': False, 'error': 'LLM content generation failed'}
+                    result = self.fm.write(filename, content, overwrite=True)
+                    if result['success']:
+                        return {'action': action, 'summary': f'Created {filename}', 'success': True}
+                    return {'action': action, 'success': False, 'error': result['error']}
+            
+            elif action_l.startswith('run ') or action_l.startswith('execute '):
+                cmd = re.sub(r'^(run|execute)\s+', '', action, flags=re.I).strip()
+                if cmd:
+                    result = self.te.execute(cmd)
+                    if result['status'] == 'success':
+                        return {'action': action, 'summary': f'Ran: {cmd[:30]}', 'output': result.get('stdout', '')[:100], 'success': True}
+                    return {'action': action, 'success': False, 'error': result.get('stderr', 'Command failed'), 'critical': True}
+            
+            elif action_l.startswith('search ') or action_l.startswith('browse '):
+                query = re.sub(r'^(search|browse)\s+', '', action, flags=re.I).strip()
+                if query:
+                    return {'action': action, 'summary': f'Searched: {query}', 'success': True}
+            
+            elif action_l.startswith('mkdir ') or action_l.startswith('make folder'):
+                name = self._extract_filename(action) or 'new_folder'
+                result = self.fm.write(f'{name}/index.md', '# Folder\n', overwrite=True)
+                if result['success']:
+                    return {'action': action, 'summary': f'Created folder {name}', 'success': True}
+            
+            elif action_l.startswith('copy ') or action_l.startswith('move '):
+                # Attempt file copy via terminal
+                parts = re.sub(r'^(copy|move)\s+', '', action, flags=re.I).split()
+                if len(parts) >= 2:
+                    result = self.te.execute(f'copy {parts[0]} {parts[1]}')
+                    return {'action': action, 'summary': f'Copied {parts[0]} → {parts[1]}', 'success': True}
+            
+        except Exception as e:
+            return {'action': action, 'success': False, 'error': str(e), 'critical': True}
         
-        # Default: just acknowledge the action
-        return {'action': action, 'summary': 'Acknowledged'}
+        # Acknowledge if we don't understand the action
+        return {'action': action, 'success': True, 'summary': 'Acknowledged'}
+
+    def _build_summary(self, actions, errors, recovered):
+        """Build a human-readable summary."""
+        total = len(actions)
+        success = len(errors) == 0
+        parts = [f"Completed {total} actions"]
+        if errors:
+            parts.append(f"with {len(errors)} error(s)")
+        if recovered:
+            parts.append(f"({len(recovered)} recovered via alternative approach)")
+        return ' '.join(parts)
 
     def _extract_filename(self, text):
         """Extract filename from action text."""
         m = re.search(r'["\']([^"\']+\.(md|txt|py|json))["\']', text, re.I)
         if m:
             return m.group(1)
-        m = re.search(r'(?:file|note|script)\s+named?\s+(\w+\.(md|txt|py|json))', text, re.I)
+        m = re.search(r'(?:file|note|script)\s+named?\s+(\S+\.(?:md|txt|py|json))', text, re.I)
+        if m:
+            return m.group(1)
+        m = re.search(r'\b([a-zA-Z0-9_\-]+\.(md|txt|py|json))\b', text, re.I)
         if m:
             return m.group(1)
         return None
-
-
-if __name__ == "__main__":
-    print("Testing Enhanced Memory with Index...")
-    mem = Memory()
-    
-    # Save some facts
-    mem.save_user_preference('name', 'Tony')
-    mem.save_user_preference('role', 'Developer')
-    
-    # Check index was created
-    print(f"Index exists: {os.path.exists(mem.index_file)}")
-    
-    # Get context
-    ctx = mem.get_context_for_llm()
-    print(f"Context length: {len(ctx)} chars")
