@@ -1,0 +1,22 @@
+{
+  "llm": {
+    "provider": "openai",
+    "model": "auto",
+    "api_key": "sk-omniroute-default",
+    "api_base": "http://localhost:20128/v1",
+    "temperature": 0.2,
+    "max_tokens": 5000
+  },
+  "workspace": "workspace",
+  "conversation": {
+    "max_history": 10
+  },
+  "permissions": {
+    "file_write": "auto",
+    "file_read": "auto",
+    "file_edit": "auto",
+    "file_append": "auto",
+    "file_delete": "auto",
+    "file_list": "auto"
+  }
+}
