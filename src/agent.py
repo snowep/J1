@@ -1,4 +1,4 @@
-import json, os, re, requests
+import json, os, re, requests, subprocess, subprocess
 from datetime import datetime
 from src.file_manager import FileManager
 from src.terminal_executor import TerminalExecutor
@@ -54,48 +54,42 @@ class Agent:
             'settings': {'raw': ''},
             'skills': {'raw': ''},
             'memory_index': '',
-            'rules': ''
+            'rules': '',
+            'agents': '',
+            'commands': '',
+            'hooks': '',
+            'output_styles': '',
+            'statusline': ''
         }
         
-        # Load settings.md
-        settings_path = os.path.join(brain_path, 'settings.md')
-        if os.path.exists(settings_path):
-            try:
-                with open(settings_path, 'r', encoding='utf-8') as f:
-                    brain['settings']['raw'] = f.read()
-            except:
-                pass
+        # Helper to load a file if it exists
+        def _load(folder, filename):
+            path = os.path.join(brain_path, folder, filename) if folder else os.path.join(brain_path, filename)
+            if os.path.exists(path):
+                try:
+                    with open(path, 'r', encoding='utf-8') as f:
+                        return f.read()
+                except:
+                    pass
+            return ''
         
-        # Load memory index
-        memory_index_path = os.path.join(brain_path, 'memory', 'index.md')
-        if os.path.exists(memory_index_path):
-            try:
-                with open(memory_index_path, 'r', encoding='utf-8') as f:
-                    brain['memory_index'] = f.read()
-            except:
-                pass
+        # Load all brain components
+        brain['settings']['raw'] = _load('', 'settings.md')
+        brain['skills']['raw'] = _load('skills', 'skills.md')
+        brain['memory_index'] = _load('memory', 'index.md')
+        brain['rules'] = _load('rules', 'rules.md')
+        brain['agents'] = _load('agents', 'agents.md')
+        brain['commands'] = _load('commands', 'commands.md')
+        brain['hooks'] = _load('hooks', 'hooks.md')
+        brain['output_styles'] = _load('output-styles', 'output-styles.md')
+        brain['statusline'] = _load('', 'statusline.md')
         
-        # Load skills
-        skills_path = os.path.join(brain_path, 'skills', 'skills.md')
-        if os.path.exists(skills_path):
-            try:
-                with open(skills_path, 'r', encoding='utf-8') as f:
-                    brain['skills']['raw'] = f.read()
-            except:
-                pass
-        else:
-            brain['skills']['raw'] = ''
-        
-        # Load rules
-        rules_path = os.path.join(brain_path, 'rules', 'rules.md')
-        if os.path.exists(rules_path):
-            try:
-                with open(rules_path, 'r', encoding='utf-8') as f:
-                    brain['rules'] = f.read()
-            except:
-                pass
-        else:
-            brain['rules'] = ''
+        # Auto-update statusline with current branch & info
+        try:
+            branch = subprocess.check_output(['git', 'branch', '--show-current'], cwd=os.path.dirname(os.path.dirname(__file__)), text=True).strip()
+            brain['statusline'] = re.sub(r'\| Git Branch \| `.*`', f'| Git Branch | `{branch}`', brain['statusline'])
+        except:
+            pass
         
         return brain
 
@@ -339,6 +333,11 @@ Use this to reference stored notes and facts."""
         output += f"\n📝 Settings: {len(self.jarvis_brain.get('settings', {}).get('raw', ''))} chars"
         output += f"\n🧠 Skills: {len(self.capabilities)} loaded"
         output += f"\n💾 Memory: {len(self.jarvis_brain.get('memory_index', ''))} chars"
+        output += f"\n🤖 Agents: {len(self.jarvis_brain.get('agents', ''))} chars"
+        output += f"\n⚡ Commands: {len(self.jarvis_brain.get('commands', ''))} chars"
+        output += f"\n🔗 Hooks: {len(self.jarvis_brain.get('hooks', ''))} chars"
+        output += f"\n🎨 Output Styles: {len(self.jarvis_brain.get('output_styles', ''))} chars"
+        output += f"\n📊 Statusline: {len(self.jarvis_brain.get('statusline', ''))} chars"
         
         return output
 

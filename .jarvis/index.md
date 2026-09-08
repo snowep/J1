@@ -5,32 +5,40 @@
 ---
 
 ## Settings
-- **Core configuration** — [settings.md](../settings.md) → model config, permissions, workspace paths
+- **Core configuration** — [settings.md](settings.md) → model config, permissions, workspace paths
 
 ## Skills (Capabilities)
-- **File Operations** — [skills.md](skills/skills.md) → create/read/edit/delete/list files
-- **Terminal Execution** — [skills.md](skills/skills.md) → run git, python, ipconfig, etc.
-- **Internet Access** — [skills.md](skills/skills.md) → browse URLs, web search
-- **Memory & Learning** — [skills.md](skills/skills.md) → store facts, remember preferences
-- **Summarization** — [skills.md](skills/skills.md) → summarize files into notes
-- **Autonomous Planning** — [skills.md](skills/skills.md) → multi-step goal execution
+- **File Operations** — [skills/skills.md](skills/skills.md) → create/read/edit/delete/list files
+- **Terminal Execution** — [skills/skills.md](skills/skills.md) → run git, python, ipconfig, etc.
+- **Internet Access** — [skills/skills.md](skills/skills.md) → browse URLs, web search
+- **Memory & Learning** — [skills/skills.md](skills/skills.md) → store facts, remember preferences
+- **Summarization** — [skills/skills.md](skills/skills.md) → summarize files into notes
+- **Autonomous Planning** — [skills/skills.md](skills/skills.md) → multi-step goal execution
 
-## Rules
-- **Content Parsing** — [rules.md](rules/rules.md) → preserve user intent
-- **Memory Index Sync** — [rules.md](rules/rules.md) → auto-update index
-- **Auto-Logging** — [rules.md](rules/rules.md) → log all operations
-- **Safety Boundaries** — [rules.md](rules/rules.md) → stay in workspace
-- **Approval Requirements** — [rules.md](rules/rules.md) → ask before terminal/internet
+## Agents (Subagents)
+- **Code Reviewer** — [agents/agents.md](agents/agents.md) → review code for bugs
+- **Research Analyst** — [agents/agents.md](agents/agents.md) → web research & findings
+- **Note Organizer** — [agents/agents.md](agents/agents.md) → sort & categorize notes
 
 ## Commands
-_(To be added — slash commands and shortcuts)_
+- **Slash commands** — [commands/commands.md](commands/commands.md) → shortcuts like `/help`, `/status`
 
 ## Hooks
-_(To be added — shell scripts triggered on events)_
+- **Event hooks** — [hooks/hooks.md](hooks/hooks.md) → shell scripts on startup/exit
+
+## Rules
+- **Content Parsing** — [rules/rules.md](rules/rules.md) → preserve user intent
+- **Memory Index Sync** — [rules/rules.md](rules/rules.md) → auto-update index
+- **Auto-Logging** — [rules/rules.md](rules/rules.md) → log all operations
+- **Safety Boundaries** — [rules/rules.md](rules/rules.md) → stay in workspace
+- **Approval Requirements** — [rules/rules.md](rules/rules.md) → ask before terminal/internet
 
 ## Output Styles
-_(To be added — response formatting presets)_
+- **Response presets** — [output-styles/output-styles.md](output-styles/output-styles.md) → terse, verbose, formal, casual
+
+## Status
+- **Status line** — [statusline.md](statusline.md) → branch, model, tokens info
 
 ---
 
-*Last generated: startup-time. Regenerate by running JARVIS.*
+*Last updated: 2026-09-09. Regenerate by running JARVIS.*
