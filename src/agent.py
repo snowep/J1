@@ -1,4 +1,5 @@
 import json, os, re, requests
+from datetime import datetime
 from src.file_manager import FileManager
 from src.terminal_executor import TerminalExecutor
 from src.memory import Memory
@@ -23,6 +24,17 @@ class Agent:
         self.max_history = self.config.get('conversation', {}).get('max_history', 10)
         self.llm = self.config.get('llm', {})
         self.memory_context = self.memory.get_context_for_llm()
+        self.log_file = 'log.md'
+
+    def _log_activity(self, operation, details):
+        """Automatically log significant operations to log.md."""
+        timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
+        entry = f"\n### {timestamp}\n- **{operation}**: {details}"
+        try:
+            with open(self.log_file, 'a', encoding='utf-8') as f:
+                f.write(entry)
+        except Exception as e:
+            print(f"⚠️ Could not write to log: {e}")
 
     def _call_llm(self, prompt):
         try:
@@ -107,10 +119,7 @@ Now, how may I assist you?"""
         return "I'd be happy to edit my code. What would you like me to change? Please tell me which file and what to change."
 
     def _handle_browse(self, text):
-        """Handle web browsing requests."""
         text_l = text.lower()
-
-        # Check for URL pattern
         url_match = re.search(r'(https?://[^\s]+)', text)
         save = 'save' in text_l or 'remember' in text_l
 
@@ -124,15 +133,16 @@ Now, how may I assist you?"""
                     return "Browsing cancelled."
             result = self.internet.browse(url, save=save)
             if result['success']:
+                self._log_activity("Internet", f"Browsed {url} - {result['title']}")
                 output = f"📄 {result['title']}\n\n{result['content'][:1000]}"
                 if len(result['content']) > 1000:
                     output += "...\n(truncated)"
                 if 'saved' in result:
                     output += f"\n\n💾 Saved to: {result['saved']}"
+                    self._log_activity("Research", f"Saved to {result['saved']}")
                 return output
             return f"❌ {result['error']}"
 
-        # Search pattern
         if any(k in text_l for k in ['look up', 'search for', 'find', 'google']):
             if not self.internet.is_enabled():
                 return "🌐 Internet access is disabled. Type 'enable internet' to allow searching."
@@ -143,6 +153,7 @@ Now, how may I assist you?"""
                 return "What would you like me to search for?"
             result = self.internet.search(query)
             if result['success']:
+                self._log_activity("Search", f"Searched for '{query}' - {len(result['results'])} results")
                 output = f"🔍 Search results for '{query}':\n\n"
                 for i, r in enumerate(result['results'], 1):
                     output += f"{i}. {r['title']}\n   {r['url']}\n"
@@ -154,11 +165,12 @@ Now, how may I assist you?"""
         return "Please provide a URL to browse or a search query."
 
     def _handle_internet_toggle(self, text):
-        """Enable or disable internet access."""
         text_l = text.lower()
         if 'enable' in text_l or 'turn on' in text_l:
+            self._log_activity("Internet", "Enabled internet access")
             return self.internet.enable()
         if 'disable' in text_l or 'turn off' in text_l:
+            self._log_activity("Internet", "Disabled internet access")
             return self.internet.disable()
         return "Type 'enable internet' or 'disable internet'."
 
@@ -221,7 +233,6 @@ Now, how may I assist you?"""
         if any(k in text_l for k in ['create', 'make', 'write', 'generate', 'new']):
             m = self._extract_filename(text)
             return ('create', m, {})
-        # Internet commands
         if any(k in text_l for k in ['enable internet', 'disable internet', 'turn on internet', 'turn off internet']):
             return ('internet_toggle', None, {})
         if re.search(r'(https?://[^\s]+)', text):
@@ -240,6 +251,8 @@ Now, how may I assist you?"""
         if content.startswith("Error"):
             content = f"# {filename.title()}\n\nDocument content."
         result = self.fm.write(filename, content, overwrite=True)
+        if result['success']:
+            self._log_activity("File Created", f"{filename}")
         return f"✅ {result['message']}" if result['success'] else f"❌ {result['error']}"
 
     def _handle_read(self, filename):
@@ -249,8 +262,8 @@ Now, how may I assist you?"""
             return f"📁 Files:\n{items}" if items else "📁 Empty"
         result = self.fm.read(filename)
         if result['success']:
-            return f"📄 {filename}:\n\n{result['content']}"
-        return f"❌ {result['error']}"
+            self._log_activity("File Read", filename)
+        return f"📄 {filename}:\n\n{result['content']}" if result['success'] else f"❌ {result['error']}"
 
     def _handle_edit(self, text, filename):
         if self._is_jarvis_self_edit(text):
@@ -265,12 +278,16 @@ Now, how may I assist you?"""
             return 'What would you like to change? Format: \'edit "file.md" change "old" to "new"\''
         old_text, new_text = m.group(2), m.group(3)
         result = self.fm.edit(filename, old_text, new_text)
+        if result['success']:
+            self._log_activity("File Edited", f"{filename} - changed '{old_text}' to '{new_text}'")
         return result['message'] if result['success'] else f"❌ {result['error']}"
 
     def _handle_delete(self, filename):
         if not filename:
             return "Which file would you like me to delete?"
         result = self.fm.delete(filename)
+        if result['success']:
+            self._log_activity("File Deleted", filename)
         return result['message'] if result['success'] else f"❌ {result['error']}"
 
     def _handle_list(self):
@@ -283,6 +300,8 @@ Now, how may I assist you?"""
     def _handle_terminal(self, command, translated=False):
         cmd = command.strip()
         result = self.te.execute(cmd)
+        if result['status'] == 'success':
+            self._log_activity("Terminal", f"{cmd} - {result['status']}")
         output = ""
         if result.get('cwd'):
             output += f"📁 CWD: {result['cwd']}\n"
@@ -311,11 +330,13 @@ Now, how may I assist you?"""
             key = m.group(2).strip()
             value = m.group(3).strip().rstrip('.')
             self.memory.save_user_preference(key, value)
+            self._log_activity("Memory", f"Learned: {key} = {value}")
             return f"✅ Remember: {key} = {value}"
         m = re.search(r'\bI\s+(?:am|work as)\s+(.+)', text, re.I)
         if m:
             value = m.group(1).strip().rstrip('.')
             self.memory.save_user_preference("my role", value)
+            self._log_activity("Memory", f"Learned: my role = {value}")
             return f"✅ Remember: my role = {value}"
         return "❌ Format: 'remember that [key] is [value]'"
 
