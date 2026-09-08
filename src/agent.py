@@ -10,9 +10,9 @@ from src.summarizer import Summarizer
 class Agent:
     """JARVIS Agent — Self-learning autonomous assistant."""
 
-    def __init__(self, config_path='workspace/.jarvis/config.json'):
+    def __init__(self, config_path='.jarvis/config.json'):
         if not os.path.exists(config_path):
-            config_path = 'config.json'  # Fallback to legacy location
+            config_path = 'workspace/.jarvis/config.json'  # Fallback
         with open(config_path, 'r') as f:
             self.config = json.load(f)
         
@@ -27,7 +27,7 @@ class Agent:
         )
         self.internet = Internet(research_path=self.config.get('internet_path', 'workspace/research'))
         self.summarizer = Summarizer(summaries_path=self.config.get('summaries_path', 'summaries'))
-        self.memory = Memory(memory_path=self.config.get('memory_path', 'workspace/.jarvis/memory'))
+        self.memory = Memory(memory_path=self.config.get('memory_path', '.jarvis/memory'))
         self.planner = AutonomousPlanner(self)
         self.history = []
         self.max_history = self.config.get('conversation', {}).get('max_history', 10)
@@ -49,7 +49,7 @@ class Agent:
 
     def _load_jarvis_brain(self):
         """Scan and load .jarvis/ directory configuration."""
-        brain_path = 'workspace/.jarvis'
+        brain_path = '.jarvis'
         brain = {
             'settings': {'raw': ''},
             'skills': {'raw': ''},
@@ -335,7 +335,7 @@ Use this to reference stored notes and facts."""
             output += f"{i}. {cap}\n"
         
         # Also show brain status
-        output += f"\n📁 Brain: workspace/.jarvis/"
+        output += f"\n📁 Brain: .jarvis/"
         output += f"\n📝 Settings: {len(self.jarvis_brain.get('settings', {}).get('raw', ''))} chars"
         output += f"\n🧠 Skills: {len(self.capabilities)} loaded"
         output += f"\n💾 Memory: {len(self.jarvis_brain.get('memory_index', ''))} chars"
