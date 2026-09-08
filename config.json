@@ -9,6 +9,7 @@
   },
   "workspace": "workspace",
   "memory_path": "memory",
+  "internet_path": "workspace/research",
   "conversation": {
     "max_history": 10
   },
@@ -19,6 +20,7 @@
     "file_append": "auto",
     "file_delete": "auto",
     "file_list": "auto",
-    "terminal": "ask"
+    "terminal": "ask",
+    "internet": "ask"
   }
 }

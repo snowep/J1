@@ -2,6 +2,7 @@ import json, os, re, requests
 from src.file_manager import FileManager
 from src.terminal_executor import TerminalExecutor
 from src.memory import Memory
+from src.internet import Internet
 
 
 class Agent:
@@ -16,6 +17,7 @@ class Agent:
             require_approval=self.config.get('permissions', {}).get('terminal', 'ask') == 'auto',
             log_path='workspace/terminal_log.json'
         )
+        self.internet = Internet(research_path=self.config.get('internet_path', 'workspace/research'))
         self.memory = Memory(memory_path=self.config.get('memory_path', 'memory'))
         self.history = []
         self.max_history = self.config.get('conversation', {}).get('max_history', 10)
@@ -92,24 +94,73 @@ Now, how may I assist you?"""
         return None
 
     def _is_jarvis_self_edit(self, text):
-        """Check if user is asking about JARVIS editing its own code."""
         text_l = text.lower()
-        self_refs = ['your code', 'your own code', 'edit yourself', 'edit your code', 
+        self_refs = ['your code', 'your own code', 'edit yourself', 'edit your code',
                      'can you edit yourself', 'can you edit your own', 'change your code',
                      'modify yourself', 'modify your code']
         return any(ref in text_l for ref in self_refs)
 
     def _handle_self_edit_request(self, text):
-        """Handle requests about JARVIS editing its own code."""
         text_l = text.lower()
-        
-        # Check for affirmation or negation
         if any(k in text_l for k in ['can you', 'would you', 'could you', 'do you']):
-            # User is asking if JARVIS can do it
             return "Certainly. I can edit my own code files. Which file would you like me to change? For example: 'edit src/agent.py change X to Y'"
-        
-        # User is making a request without specifics
         return "I'd be happy to edit my code. What would you like me to change? Please tell me which file and what to change."
+
+    def _handle_browse(self, text):
+        """Handle web browsing requests."""
+        text_l = text.lower()
+
+        # Check for URL pattern
+        url_match = re.search(r'(https?://[^\s]+)', text)
+        save = 'save' in text_l or 'remember' in text_l
+
+        if url_match:
+            url = url_match.group(1)
+            if not self.internet.is_enabled():
+                return "🌐 Internet access is disabled. Type 'enable internet' to allow browsing."
+            if self.config.get('permissions', {}).get('internet', 'ask') == 'ask':
+                response = input(f"🌐 Browse to {url}? (y/n): ").strip().lower()
+                if response not in ['y', 'yes']:
+                    return "Browsing cancelled."
+            result = self.internet.browse(url, save=save)
+            if result['success']:
+                output = f"📄 {result['title']}\n\n{result['content'][:1000]}"
+                if len(result['content']) > 1000:
+                    output += "...\n(truncated)"
+                if 'saved' in result:
+                    output += f"\n\n💾 Saved to: {result['saved']}"
+                return output
+            return f"❌ {result['error']}"
+
+        # Search pattern
+        if any(k in text_l for k in ['look up', 'search for', 'find', 'google']):
+            if not self.internet.is_enabled():
+                return "🌐 Internet access is disabled. Type 'enable internet' to allow searching."
+            query = text
+            for w in ['look up', 'search for', 'find', 'google', 'what is', 'who is']:
+                query = re.sub(r'\b' + w + r'\b', '', query, flags=re.I).strip()
+            if not query:
+                return "What would you like me to search for?"
+            result = self.internet.search(query)
+            if result['success']:
+                output = f"🔍 Search results for '{query}':\n\n"
+                for i, r in enumerate(result['results'], 1):
+                    output += f"{i}. {r['title']}\n   {r['url']}\n"
+                    if r['snippet']:
+                        output += f"   {r['snippet'][:100]}...\n"
+                return output
+            return f"❌ {result['error']}"
+
+        return "Please provide a URL to browse or a search query."
+
+    def _handle_internet_toggle(self, text):
+        """Enable or disable internet access."""
+        text_l = text.lower()
+        if 'enable' in text_l or 'turn on' in text_l:
+            return self.internet.enable()
+        if 'disable' in text_l or 'turn off' in text_l:
+            return self.internet.disable()
+        return "Type 'enable internet' or 'disable internet'."
 
     def _translate_to_command(self, text):
         text_l = text.lower()
@@ -170,6 +221,13 @@ Now, how may I assist you?"""
         if any(k in text_l for k in ['create', 'make', 'write', 'generate', 'new']):
             m = self._extract_filename(text)
             return ('create', m, {})
+        # Internet commands
+        if any(k in text_l for k in ['enable internet', 'disable internet', 'turn on internet', 'turn off internet']):
+            return ('internet_toggle', None, {})
+        if re.search(r'(https?://[^\s]+)', text):
+            return ('browse', text, {})
+        if any(k in text_l for k in ['look up', 'search for', 'find', 'google', 'browse the web', 'web search']):
+            return ('browse', text, {})
         return ('chat', None, {})
 
     def _handle_create(self, text, filename):
@@ -195,10 +253,8 @@ Now, how may I assist you?"""
         return f"❌ {result['error']}"
 
     def _handle_edit(self, text, filename):
-        # First check if this is about JARVIS editing its own code
         if self._is_jarvis_self_edit(text):
             return self._handle_self_edit_request(text)
-        
         if not filename:
             return "Which file would you like me to edit? For example: 'edit src/agent.py change X to Y'"
         m = self._extract_filename(text)
@@ -206,7 +262,7 @@ Now, how may I assist you?"""
             filename = m
         m = re.search(r'\b(change|replace)\s+["\']([^"\']+)["\']?\s+(?:to|with)\s+["\']([^"\']+)["\']', text, re.I)
         if not m:
-            return 'What would you like to change in this file? Format: \'edit "file.md" change "old" to "new"\''
+            return 'What would you like to change? Format: \'edit "file.md" change "old" to "new"\''
         old_text, new_text = m.group(2), m.group(3)
         result = self.fm.edit(filename, old_text, new_text)
         return result['message'] if result['success'] else f"❌ {result['error']}"
@@ -277,11 +333,13 @@ Now, how may I assist you?"""
             'delete': lambda: self._handle_delete(target),
             'list': self._handle_list,
             'terminal': lambda: self._handle_terminal(target, params.get('translated', False)),
+            'internet_toggle': lambda: self._handle_internet_toggle(user_input),
+            'browse': lambda: self._handle_browse(user_input),
             'chat': lambda: self._handle_chat(user_input)
         }[op]()
 
 
 if __name__ == "__main__":
-    print("JARVIS: Commands: create/read/edit/delete/list, mkdir/rmdir, remember that..., commit, show ip")
+    print("JARVIS: Commands: create/read/edit/delete/list, mkdir/rmdir, remember that..., browse [url], search [query]")
     while (cmd := input("\nYou: ")) and cmd.lower() not in ['exit', 'quit']:
         print(Agent().process(cmd))
