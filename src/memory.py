@@ -140,42 +140,23 @@ class AutonomousPlanner:
         self.abort_on_major_failure = abort_on_major_failure
 
     def plan_and_execute(self, high_level_goal):
-        """
-        Plan and execute a high-level goal with error recovery.
-        
-        Returns:
-            Dict with goal, plan, actions, errors, and recovery info
-        """
         plan = self._generate_plan(high_level_goal)
-        
         actions_taken = []
         errors = []
         recovered = []
-        
-        for i, action in enumerate(plan):
+
+        for action in plan:
             result = self._execute_with_recovery(action, high_level_goal)
-            
-            actions_taken.append({
-                'action': action,
-                'result': result,
-                'success': result.get('success', False)
-            })
-            
+            actions_taken.append({'action': action, 'result': result, 'success': result.get('success', False)})
             if not result.get('success'):
                 errors.append({'action': action, 'error': result.get('error', 'Unknown')})
             elif result.get('recovered'):
                 recovered.append({'action': action, 'strategy': result.get('recovery_strategy')})
-            
             self.memory.save_decision(action, high_level_goal, result.get('summary', 'Completed'))
-            
-            # Abort if configured and this was a major failure
             if self.abort_on_major_failure and not result.get('success') and result.get('critical'):
-                actions_taken.append({
-                    'action': 'ABORT',
-                    'result': {'summary': f'Aborted after critical failure: {result.get("error")}', 'success': False}
-                })
+                actions_taken.append({'action': 'ABORT', 'result': {'summary': f'Aborted: {result.get("error")}', 'success': False}})
                 break
-        
+
         return {
             'goal': high_level_goal,
             'plan': '\n'.join(f"{i+1}. {a}" for i, a in enumerate(plan)),
@@ -188,126 +169,120 @@ class AutonomousPlanner:
         }
 
     def _generate_plan(self, high_level_goal):
-        """Generate a plan with retry on malformed output."""
-        plan_prompt = f"""Break down this goal into concrete steps. Respond with ONLY a numbered list.
+        workspace_files = self.fm.list()
+        file_list = ', '.join(f['name'] for f in workspace_files.get('items', []) if f['type'] == 'file') or 'none'
+
+        plan_prompt = f"""Break this goal into concrete, file-level actions you can execute right now.
+Available files in workspace: [{file_list}]
+
+Each step MUST start with ONE of these verbs: read, write, delete, list, run, search, remember
+Each step must name a SPECIFIC filename from the list above.
+Do NOT write vague phrases like "review" or "analyze". Write EXACTLY what to do.
 
 Goal: {high_level_goal}
 
-Steps (one per line, action verb first):
+Steps:
 1."""
-        
+
         for attempt in range(self.max_retries + 1):
             plan_text = self.agent._call_llm(plan_prompt)
             steps = self._parse_plan(plan_text)
             if steps:
-                return steps
-            # Retry with stronger instruction if failed to parse
-            plan_prompt = f"""You did not provide a valid numbered list. Again, break down this goal.
-Respond with ONLY numbered lines starting with numbers:
+                # Ensure at least half the steps are concrete actions
+                concrete = [s for s in steps if re.match(r'^(read|write|delete|list|run|search|remember|mkdir|rmdir)\b', s, re.I)]
+                if len(concrete) >= max(1, len(steps) * 0.5):
+                    return steps
+            plan_prompt = f"Give me a numbered list. Each line must start with: read, write, delete, list, run, search, or remember. Use actual filenames from: [{file_list}]. No bold, no markdown.\n\nGoal: {high_level_goal}"
 
-Goal: {high_level_goal}"""
-        
-        # Fallback: return empty plan rather than crash
-        return []
+        # If all retries failed, return a minimal fallback: list files
+        return ["list files"]
 
     def _parse_plan(self, plan_text):
-        """Parse plan, tolerant of malformed output."""
         if not plan_text:
             return []
         steps = []
         for line in plan_text.strip().split('\n'):
             line = line.strip()
-            if not line:
-                continue
+            # Strip markdown bold: **read** -> read, and stray backticks
+            line = re.sub(r'\*\*([^*]+)\*\*', r'\1', line)
+            line = line.replace('`', '')
             m = re.match(r'^\d+[\.\)]\s*(.+)', line)
             if m:
                 steps.append(m.group(1).strip())
         return steps
 
     def _execute_with_recovery(self, action, goal):
-        """Execute an action with retry and fallback strategies."""
-        # Primary attempt
         result = self._execute_action(action)
-        
-        # If succeeded, return
         if result.get('success'):
             return result
-        
-        # If failed, try alternative approaches
+
         error = result.get('error', 'Unknown error')
         strategies = self._generate_alternatives(action, error)
-        
         for strategy in strategies:
             result = self._execute_action(strategy)
             if result.get('success'):
                 result['recovered'] = True
                 result['recovery_strategy'] = f"'{action}' → '{strategy}'"
                 return result
-        
-        # Add final failure result
-        return {
-            'action': action,
-            'success': False,
-            'error': error,
-            'critical': result.get('critical', False),
-            'summary': f'Failed: {action}'
-        }
+
+        return {'action': action, 'success': False, 'error': error, 'critical': result.get('critical', False), 'summary': f'Failed: {action}'}
 
     def _generate_alternatives(self, action, error):
-        """Generate alternative approaches when an action fails."""
         alternatives = []
         action_l = action.lower()
-        
+
         if 'not found' in error.lower() or 'no such file' in error.lower():
-            # Try different filename patterns
-            if action_l.startswith('read '):
-                filename = self._extract_filename(action)
-                if filename:
-                    # Try with .md extension if missing
-                    if not filename.endswith('.md'):
-                        alternatives.append(f"read {filename}.md")
-                    # Try lowercase
-                    alternatives.append(f"read {filename.lower()}")
-        
-        elif 'permission' in error.lower() or 'access denied' in error.lower():
-            alternatives.append(f"list files")
-        
-        elif 'timed out' in error.lower() or 'timeout' in error.lower():
-            alternatives.append(action.replace('search', 'browse'))
-        
-        elif action_l.startswith('write ') or action_l.startswith('create '):
-            # Alternative: retry with simpler content
             filename = self._extract_filename(action)
             if filename:
-                alternatives.append(f"write {filename} with basic content")
-        
-        # Always try removing excessive phrasing
-        cleaned = re.sub(r'\b(please|kindly|now|quickly|carefully)\b', '', action, flags=re.I).strip()
-        if cleaned != action:
+                if not filename.endswith('.md'):
+                    alternatives.append(action.replace(filename, f"{filename}.md"))
+                alternatives.append(action.replace(filename, filename.lower()))
+                alternatives.append(action.replace(filename, filename.title()))
+
+        elif 'permission' in error.lower() or 'access denied' in error.lower():
+            alternatives.append("list files")
+
+        elif 'timed out' in error.lower():
+            alternatives.append(action.replace('search', 'browse'))
+
+        elif action_l.startswith('write ') or action_l.startswith('create '):
+            filename = self._extract_filename(action)
+            if filename:
+                alternatives.append(f"write {filename} with placeholder content")
+
+        cleaned = re.sub(r'\b(please|kindly|now|quickly|carefully|thoroughly|details|about|of|from)\b', '', action, flags=re.I).strip()
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+        if cleaned != action and len(cleaned.split()) >= 2:
             alternatives.append(cleaned)
-        
+
         return alternatives
 
     def _execute_action(self, action):
-        """Execute a single action with error capture."""
         action_l = action.lower()
-        
+
         try:
-            if action_l.startswith('read ') or action_l.startswith('open '):
+            # ── READ ──────────────────────────────────────
+            if re.match(r'^(read|open|cat|view)\b', action_l):
                 filename = self._extract_filename(action)
                 if filename:
                     result = self.fm.read(filename)
                     if result['success']:
                         return {'action': action, 'summary': f'Read {filename}', 'content': result['content'][:200], 'success': True}
                     return {'action': action, 'success': False, 'error': result['error']}
-            
-            elif action_l.startswith('write ') or action_l.startswith('create '):
+                # No filename found — list files instead as fallback
+                return self._execute_action("list files")
+
+            # ── WRITE / CREATE ─────────────────────────────
+            if re.match(r'^(write|create|save|make|generate)\b', action_l):
                 filename = self._extract_filename(action)
+                if not filename:
+                    # Try to infer filename from context
+                    m = re.search(r'\b(\w+\.md)\b', action)
+                    filename = m.group(1) if m else None
                 if filename:
-                    # Extract content hint from after filename
-                    content_hint = re.sub(r'^(write|create)\s+\S+\s*', action, '', flags=re.I).strip()
+                    content_hint = re.sub(r'^(write|create|save|make|generate)\s+(\S+)\s*', '', action, flags=re.I).strip()
                     content = self.agent._call_llm_with_memory(
-                        f"Write content for: {filename}. Action: {action}. Context hint: {content_hint}"
+                        f"Write markdown content for: {filename}. Context: {action}"
                     )
                     if content.startswith('Error'):
                         return {'action': action, 'success': False, 'error': 'LLM content generation failed'}
@@ -315,59 +290,76 @@ Goal: {high_level_goal}"""
                     if result['success']:
                         return {'action': action, 'summary': f'Created {filename}', 'success': True}
                     return {'action': action, 'success': False, 'error': result['error']}
-            
-            elif action_l.startswith('run ') or action_l.startswith('execute '):
-                cmd = re.sub(r'^(run|execute)\s+', '', action, flags=re.I).strip()
-                if cmd:
-                    result = self.te.execute(cmd)
-                    if result['status'] == 'success':
-                        return {'action': action, 'summary': f'Ran: {cmd[:30]}', 'output': result.get('stdout', '')[:100], 'success': True}
-                    return {'action': action, 'success': False, 'error': result.get('stderr', 'Command failed'), 'critical': True}
-            
-            elif action_l.startswith('search ') or action_l.startswith('browse '):
-                query = re.sub(r'^(search|browse)\s+', '', action, flags=re.I).strip()
-                if query:
-                    return {'action': action, 'summary': f'Searched: {query}', 'success': True}
-            
-            elif action_l.startswith('mkdir ') or action_l.startswith('make folder'):
-                name = self._extract_filename(action) or 'new_folder'
-                result = self.fm.write(f'{name}/index.md', '# Folder\n', overwrite=True)
+                return {'action': action, 'success': False, 'error': 'Could not determine filename'}
+
+            # ── DELETE ─────────────────────────────────────
+            if re.match(r'^(delete|remove|rm|del)\b', action_l):
+                filename = self._extract_filename(action)
+                if filename:
+                    result = self.fm.delete(filename)
+                    if result['success']:
+                        return {'action': action, 'summary': f'Deleted {filename}', 'success': True}
+                    return {'action': action, 'success': False, 'error': result['error']}
+                return {'action': action, 'success': False, 'error': 'Could not determine filename to delete'}
+
+            # ── LIST ───────────────────────────────────────
+            if re.match(r'^(list|ls|dir|show files)\b', action_l):
+                result = self.fm.list()
                 if result['success']:
-                    return {'action': action, 'summary': f'Created folder {name}', 'success': True}
-            
-            elif action_l.startswith('copy ') or action_l.startswith('move '):
-                # Attempt file copy via terminal
-                parts = re.sub(r'^(copy|move)\s+', '', action, flags=re.I).split()
-                if len(parts) >= 2:
-                    result = self.te.execute(f'copy {parts[0]} {parts[1]}')
-                    return {'action': action, 'summary': f'Copied {parts[0]} → {parts[1]}', 'success': True}
-            
+                    names = [f['name'] for f in result.get('items', [])]
+                    return {'action': action, 'summary': f'Listed {len(names)} items', 'files': names, 'success': True}
+                return {'action': action, 'success': False, 'error': result['error']}
+
+            # ── RUN / EXECUTE ──────────────────────────────
+            if re.match(r'^(run|execute|python|pip|git)\b', action_l):
+                cmd = action
+                result = self.te.execute(cmd)
+                if result['status'] == 'success':
+                    return {'action': action, 'summary': f'Ran: {cmd[:40]}', 'output': result.get('stdout', '')[:100], 'success': True}
+                return {'action': action, 'success': False, 'error': result.get('stderr', 'Command failed'), 'critical': True}
+
+            # ── SEARCH / BROWSE ────────────────────────────
+            if re.match(r'^(search|browse|look up|find|google)\b', action_l):
+                query = re.sub(r'^(search|browse|look up|find|google)\s+(for\s+)?', '', action, flags=re.I).strip()
+                if query:
+                    result = self.agent.internet.search(query)
+                    if result.get('success'):
+                        return {'action': action, 'summary': f'Searched: {query} ({len(result.get("results", []))} results)', 'success': True}
+                    return {'action': action, 'success': False, 'error': result.get('error', 'Search failed')}
+                return {'action': action, 'success': False, 'error': 'No search query found'}
+
+            # ── REMEMBER / LEARN ───────────────────────────
+            if re.match(r'^(remember|learn|store)\b', action_l):
+                m = re.search(r'\b(remember|learn|store)\s+(?:that\s+)?(.+?)\s+(?:is|=)\s+(.+)', action, re.I)
+                if m:
+                    key, value = m.group(2).strip(), m.group(3).strip().rstrip('.')
+                    self.memory.save_user_preference(key, value)
+                    return {'action': action, 'summary': f'Remembered: {key} = {value}', 'success': True}
+                return {'action': action, 'success': False, 'error': 'Could not parse key-value pair'}
+
+            # ── ACKNOWLEDGE anything else ──────────────────
+            return {'action': action, 'success': True, 'summary': f'Acknowledged: {action}'}
+
         except Exception as e:
             return {'action': action, 'success': False, 'error': str(e), 'critical': True}
-        
-        # Acknowledge if we don't understand the action
-        return {'action': action, 'success': True, 'summary': 'Acknowledged'}
 
     def _build_summary(self, actions, errors, recovered):
-        """Build a human-readable summary."""
         total = len(actions)
-        success = len(errors) == 0
         parts = [f"Completed {total} actions"]
         if errors:
             parts.append(f"with {len(errors)} error(s)")
         if recovered:
-            parts.append(f"({len(recovered)} recovered via alternative approach)")
+            parts.append(f"({len(recovered)} recovered)")
         return ' '.join(parts)
 
     def _extract_filename(self, text):
-        """Extract filename from action text."""
-        m = re.search(r'["\']([^"\']+\.(md|txt|py|json))["\']', text, re.I)
+        m = re.search(r'["\']([^"\']+\.(md|txt|py|json|csv|html))["\']', text, re.I)
         if m:
             return m.group(1)
-        m = re.search(r'(?:file|note|script)\s+named?\s+(\S+\.(?:md|txt|py|json))', text, re.I)
+        m = re.search(r'\b([a-zA-Z0-9_\-]+\.(md|txt|py|json|csv|html))\b', text, re.I)
         if m:
             return m.group(1)
-        m = re.search(r'\b([a-zA-Z0-9_\-]+\.(md|txt|py|json))\b', text, re.I)
+        m = re.search(r'(\w+)\.(md|txt|py|json)', text, re.I)
         if m:
-            return m.group(1)
+            return f'{m.group(1)}.{m.group(2)}'
         return None
