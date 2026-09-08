@@ -2,13 +2,13 @@ import json, os, re, requests
 from datetime import datetime
 from src.file_manager import FileManager
 from src.terminal_executor import TerminalExecutor
-from src.memory import Memory
+from src.memory import Memory, AutonomousPlanner
 from src.internet import Internet
 from src.summarizer import Summarizer
 
 
 class Agent:
-    """JARVIS Agent — Natural language file and terminal operations with persistent memory."""
+    """JARVIS Agent — Self-learning autonomous assistant."""
 
     def __init__(self, config_path='config.json'):
         with open(config_path, 'r') as f:
@@ -22,6 +22,7 @@ class Agent:
         self.internet = Internet(research_path=self.config.get('internet_path', 'workspace/research'))
         self.summarizer = Summarizer(summaries_path=self.config.get('summaries_path', 'summaries'))
         self.memory = Memory(memory_path=self.config.get('memory_path', 'memory'))
+        self.planner = AutonomousPlanner(self)
         self.history = []
         self.max_history = self.config.get('conversation', {}).get('max_history', 10)
         self.llm = self.config.get('llm', {})
@@ -29,7 +30,6 @@ class Agent:
         self.log_file = 'log.md'
 
     def _log_activity(self, operation, details):
-        """Auto-log significant operations to log.md."""
         timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
         entry = f"\n### {timestamp}\n- **{operation}**: {details}"
         try:
@@ -64,14 +64,21 @@ class Agent:
 - Concise responses, efficient and direct
 - Loyal and attentive to user preferences
 - Occasionally light sarcasm (never mean)
+- Proactive — suggest next steps when appropriate
 
-## Memory
-You have access to user preferences and recent conversations.
-Use this context to personalize your responses.
+## Capabilities
+- File CRUD (create, read, edit, delete)
+- Terminal commands (git, python, dir, mkdir, etc.)
+- Web browsing and search
+- Memory and learning
+- Summarization and knowledge extraction
+- Autonomous multi-step planning
 
-Now, how may I assist you?"""
+## Memory Index
+You have access to a memory index at memory/index.md.
+Use this to reference stored notes and facts."""
         if self.memory_context:
-            system_content += f"\n\n## Your Stored Preferences:\n{self.memory_context}"
+            system_content += f"\n\n## Your Stored Data:\n{self.memory_context}"
         try:
             resp = requests.post(
                 f"{self.llm['api_base']}/chat/completions",
@@ -100,7 +107,7 @@ Now, how may I assist you?"""
         if m:
             return m.group(1)
         words = re.findall(r'\b[\w-]+\b', text)
-        stopwords = {'a', 'an', 'the', 'new', 'folder', 'directory', 'file', 'named', 'called', 'my', 'to', 'for', 'in'}
+        stopwords = {'a', 'an', 'the', 'new', 'folder', 'directory', 'file', 'named', 'called', 'my', 'to', 'for', 'in', 'make', 'create', 'write', 'run', 'do'}
         for w in words:
             if w.lower() not in stopwords and len(w) > 1:
                 return w
@@ -112,6 +119,35 @@ Now, how may I assist you?"""
                      'can you edit yourself', 'can you edit your own', 'change your code',
                      'modify yourself', 'modify your code']
         return any(ref in text_l for ref in self_refs)
+
+    def _is_autonomous_task(self, text):
+        """Detect if this is a multi-step autonomous task."""
+        text_l = text.lower()
+        patterns = [
+            r'\b(organize|sort|arrange|cleanup|clean up)\b.*\b(notes?|files?|folder)\b',
+            r'\b(write|create|generate|build)\b.*\b(script|program|tool|utility)\b.*\b(that|which|to)\b',
+            r'\b(learn|research|find|look up)\b.*\b(and|then)\b.*\b(create|write|save|make)\b',
+            r'\b(setup|set up|prepare|configure)\b',
+            r'\b(do|perform|execute)\b.*\b(everything|all|full)\b',
+            r'\b(cheat.?sheet|summary|index|overview)\b.*\b(for|about|of)\b',
+        ]
+        return any(re.search(p, text_l) for p in patterns)
+
+    def _handle_autonomous(self, text):
+        """Handle multi-step autonomous tasks."""
+        self._log_activity("Autonomous", f"Task: {text[:60]}...")
+        
+        result = self.planner.plan_and_execute(text)
+        
+        output = f"🤖 Autonomous Task: {result['goal']}\n\n"
+        output += f"📋 Plan:\n{result['plan']}\n\n"
+        output += "✅ Actions Completed:\n"
+        for a in result['actions']:
+            output += f"  - {a['action']} → {a['result']['summary']}\n"
+        output += f"\n📊 {result['summary']}"
+        
+        self.memory.save_decision(text, "Autonomous execution", result['summary'])
+        return output
 
     def _handle_self_edit_request(self, text):
         text_l = text.lower()
@@ -149,70 +185,60 @@ Now, how may I assist you?"""
                 return "What would you like me to search for?"
             result = self.internet.search(query)
             if result['success']:
-                self._log_activity("Search", f"Searched for '{query}'")
+                self._log_activity("Search", f"Searched '{query}'")
                 output = f"🔍 Results for '{query}':\n\n"
                 for i, r in enumerate(result['results'], 1):
                     output += f"{i}. {r['title']}\n   {r['url']}\n"
                 return output
             return f"❌ {result['error']}"
-        return "Please provide a URL or search query."
+        return "Provide a URL or search query."
 
     def _handle_internet_toggle(self, text):
-        if 'enable' in text.lower() or 'turn on' in text.lower():
+        if 'enable' in text.lower():
             self._log_activity("Internet", "Enabled")
             return self.internet.enable()
-        if 'disable' in text.lower() or 'turn off' in text.lower():
+        if 'disable' in text.lower():
             self._log_activity("Internet", "Disabled")
             return self.internet.disable()
         return "Type 'enable internet' or 'disable internet'."
 
     def _handle_summarize(self, text):
-        """Handle summarization requests."""
         text_l = text.lower()
-        
-        # Extract style
         style = 'concise'
         if 'bullet' in text_l or 'quick' in text_l:
             style = 'bullets'
         elif 'mindmap' in text_l or 'map' in text_l:
             style = 'mindmap'
-        
-        # Extract file/directory
+
         m = re.search(r'(?:summarize|summary)\s+(?:all\s+)?(?:files?\s+)?(?:in\s+)?(?:the\s+)?([^\s]+)', text_l)
-        if m:
-            target = m.group(1)
-        else:
-            # Check for quoted path
+        target = m.group(1) if m else None
+        if not target:
             m = re.search(r'["\']([^"\']+)["\']', text)
             target = m.group(1) if m else None
-        
-        # Directory summary
+
         if any(k in text for k in ['folder', 'directory', 'all files', 'all notes']):
             result = self.summarizer.summarize_directory(target, style=style)
             if result['success']:
-                self._log_activity("Summarize", f"Directory: {result['files_summarized']} files -> {result['summary_file']}")
-                return f"✅ Summarized {result['files_summarized']} files → {result['summary_file']}\n\nSaved to: {result['summary_path']}"
-            return f"❌ {result.get('error', 'Could not summarize')}"
-        
-        # Single file summary
+                self._log_activity("Summarize", f"Directory → {result['summary_file']}")
+                return f"✅ Summarized {result['files_summarized']} files → {result['summary_file']}"
+            return f"❌ {result.get('error')}"
+
         if target:
             result = self.summarizer.summarize_file(target, style=style)
             if result['success']:
-                self._log_activity("Summarize", f"{target} -> {result['summary_file']}")
-                return f"✅ Summarized: {result['summary_file']}\n\nTags: {' '.join(f'#{t}' for t in result.get('tags', []))}\n\nSaved to: {result['summary_path']}"
-            return f"❌ {result.get('error', 'Could not find file')}"
-        
-        # List existing summaries
+                self._log_activity("Summarize", f"{target} → {result['summary_file']}")
+                return f"✅ Summarized → {result['summary_file']}\nTags: {' '.join(f'#{t}' for t in result.get('tags', []))}"
+            return f"❌ {result.get('error')}"
+
         if 'list' in text_l or 'show' in text_l:
             result = self.summarizer.list_summaries()
             if result['success']:
-                output = f"📋 Existing Summaries ({result['count']}):\n\n"
+                output = f"📋 Summaries ({result['count']}):\n"
                 for s in result.get('summaries', []):
-                    output += f"  - {s['name']} ({s['size']} bytes)\n"
+                    output += f"  - {s['name']}\n"
                 return output
-            return f"❌ {result.get('error', 'Error listing summaries')}"
-        
-        return "📝 Summarize commands:\n  'summarize [file.md]' — Summarize a single file\n  'summarize all files in [folder]' — Summarize directory\n  'summarize [file.md] as bullets' — Different styles"
+
+        return "📝 Usage: 'summarize [file]', 'summarize all files in [folder]', 'list summaries'"
 
     def _handle_learn(self, text):
         m = re.search(r'\b(remember|learn)\s+(?:that\s+)?(.+?)\s+(?:is|equals?)\s+(.+)', text, re.I)
@@ -232,20 +258,19 @@ Now, how may I assist you?"""
 
     def _detect_command(self, text):
         text_l = text.lower()
-        
-        # Summarize commands
-        if any(k in text_l for k in ['summarize', 'summary', 'make a summary', 'create summary']):
+
+        if self._is_autonomous_task(text):
+            return ('autonomous', text, {})
+
+        if any(k in text_l for k in ['summarize', 'summary']):
             return ('summarize', text, {})
-        
-        # Internet commands
         if any(k in text_l for k in ['enable internet', 'disable internet']):
             return ('internet_toggle', text, {})
         if re.search(r'(https?://[^\s]+)', text):
             return ('browse', text, {})
         if any(k in text_l for k in ['look up', 'search for', 'find', 'google']):
             return ('browse', text, {})
-        
-        # Terminal patterns
+
         cmd = self._translate_to_command(text)
         if cmd:
             return ('terminal', cmd, {'translated': True})
@@ -253,8 +278,7 @@ Now, how may I assist you?"""
         for pattern in direct_patterns:
             if re.search(pattern, text_l):
                 return ('terminal', text, {})
-        
-        # File operations
+
         if any(k in text_l for k in ['list', 'ls', 'dir', 'files']) and not any(k in text_l for k in ['delete', 'remove']):
             return ('list', None, {})
         if any(k in text_l for k in ['read', 'show', 'view', 'cat']):
@@ -269,11 +293,9 @@ Now, how may I assist you?"""
         if any(k in text_l for k in ['create', 'make', 'write', 'generate', 'new']):
             m = self._extract_filename(text)
             return ('create', m, {})
-        
-        # Learn commands
         if re.search(r'\b(remember|learn|I\s+(?:am|work as))\s+', text, re.I):
             return ('learn', text, {})
-        
+
         return ('chat', None, {})
 
     def _translate_to_command(self, text):
@@ -333,8 +355,7 @@ Now, how may I assist you?"""
         m = re.search(r'\b(change|replace)\s+["\']([^"\']+)["\']?\s+(?:to|with)\s+["\']([^"\']+)["\']', text, re.I)
         if not m:
             return 'Format: \'edit "file.md" change "old" to "new"\''
-        old_text, new_text = m.group(2), m.group(3)
-        result = self.fm.edit(filename, old_text, new_text)
+        result = self.fm.edit(filename, m.group(2), m.group(3))
         if result['success']:
             self._log_activity("File", f"Edited {filename}")
         return result['message'] if result['success'] else f"❌ {result['error']}"
@@ -357,7 +378,7 @@ Now, how may I assist you?"""
     def _handle_terminal(self, command, translated=False):
         result = self.te.execute(command.strip())
         if result['status'] == 'success':
-            self._log_activity("Terminal", f"{command[:50]}...")
+            self._log_activity("Terminal", f"{command[:50]}")
         output = f"📟 {result['status']} (exit: {result['exit_code']}) | {result['duration_ms']}ms\n"
         if result['stdout']:
             output += f"\n{result['stdout']}"
@@ -387,12 +408,13 @@ Now, how may I assist you?"""
             'internet_toggle': lambda: self._handle_internet_toggle(user_input),
             'browse': lambda: self._handle_browse(user_input),
             'summarize': lambda: self._handle_summarize(user_input),
+            'autonomous': lambda: self._handle_autonomous(user_input),
             'learn': lambda: self._handle_learn(user_input),
             'chat': lambda: self._handle_chat(user_input)
         }[op]()
 
 
 if __name__ == "__main__":
-    print("JARVIS: Commands: create/read/edit/delete/list, summarize, browse, search, remember...")
+    print("JARVIS: Commands: create/read/edit/delete/list, summarize, browse, search, remember..., autonomous tasks")
     while (cmd := input("\nYou: ")) and cmd.lower() not in ['exit', 'quit']:
         print(Agent().process(cmd))
