@@ -370,6 +370,60 @@ Use this to reference stored notes and facts."""
             return f"🎯 **Skill '{skill_name}' executed**:\n\n{result.get('output', '')}"
         return f"❌ Skill '{skill_name}' failed: {result.get('error', '')}"
 
+    def _handle_skill_create(self, text):
+        """Create a new skill file in .jarvis/skills/."""
+        # Extract skill name from path like skills/hello_world.md or bare name
+        m = re.search(r'skills?/([\w_-]+)\.md', text, re.I)
+        if m:
+            skill_name = m.group(1)
+        else:
+            # Try to find a name after 'skill' keyword
+            m2 = re.search(r'\bskill\s+["\']?([\w_-]+)["\']?', text, re.I)
+            skill_name = m2.group(1) if m2 else None
+        
+        if not skill_name:
+            return "❌ Couldn't determine skill name. Use: 'create skill my_skill' or 'create skills/my_skill.md'"
+        
+        skill_path = os.path.join('.jarvis', 'skills', f'{skill_name}.md')
+        
+        if os.path.exists(skill_path):
+            return f"⚠️ Skill '{skill_name}' already exists at {skill_path}. Delete it first or use a different name."
+        
+        # Generate skill content using LLM
+        content = self._call_llm_with_memory(
+            f"Create a new JARVIS skill called '{skill_name}' based on this request: {text}. "
+            f"Return ONLY a complete skill markdown file with YAML frontmatter (name, description), "
+            f"instructions section, parameters section, and a Python code block with a run() function. "
+            f"The code should be safe and self-contained."
+        )
+        
+        if content.startswith('Error') or not content.strip():
+            # Fallback: create a minimal skill template
+            content = (
+                f'---\n'
+                f'name: {skill_name}\n'
+                f'description: A skill created from user request.\n'
+                f'---\n\n'
+                f'# {skill_name.title()} Skill\n\n'
+                f'## Instructions\n\n'
+                f'This skill was created from the request: {text}\n\n'
+                f'## Parameters\n\n'
+                f'- `message` (optional): Input message.\n\n'
+                f'## Code\n\n'
+                f'```python\n'
+                f'def run(message="", **kwargs):\n'
+                f'    return f"{skill_name} executed: {message}"\n'
+                f'```\n'
+            )
+        
+        # Write the skill file
+        result = self.fm.write(skill_path, content, overwrite=True)
+        if result['success']:
+            self.skill_manager.refresh()  # Reload skills
+            self._log_activity("Skill", f"Created skill: {skill_name}")
+            return f"✅ Created skill '{skill_name}' at {skill_path}\n\nUse it with: 'use the {skill_name} skill'"
+        return f"❌ Failed to create skill: {result.get('error', '')}"
+
     def _handle_learn(self, text):
         m = re.search(r'\b(remember|learn)\s+(?:that\s+)?(.+?)\s+(?:is|equals?)\s+(.+)', text, re.I)
         if m:
@@ -405,6 +459,10 @@ Use this to reference stored notes and facts."""
             for sk in self.skill_manager.list_skills():
                 if sk in raw.lower().replace(' ', '_'):
                     return ('skill', sk, {'action': 'run'})
+        # Skill creation detection
+        if re.search(r'\b(?:create|make|write|build)\s+(?:a\s+)?(?:new\s+)?skill', text_l) or \
+           re.search(r'\bskills?/[\w_-]+\.md\b', text):
+            return ('skill_create', text, {})
         if any(k in text_l for k in ['list skills', 'available skills', 'show skills', 'what skills', 'what can you do']):
             return ('skill', None, {'action': 'list'})
 
@@ -560,6 +618,7 @@ Use this to reference stored notes and facts."""
             'learn': lambda: self._handle_learn(user_input),
             'capabilities': lambda: self._handle_capabilities(),
             'skill': lambda: self._handle_skill(target, params),
+            'skill_create': lambda: self._handle_skill_create(user_input),
             'chat': lambda: self._handle_chat(user_input)
         }[op]()
 
