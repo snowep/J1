@@ -1,205 +1,180 @@
 # JARVIS OS
 
-Personal AI assistant framework with autonomous reasoning, persistent memory, and real system access — built to be genuinely helpful, not just a chat wrapper.
+**JARVIS OS** is a personal AI operating layer — a local assistant that can use your filesystem, terminal, web, memory, and skills through a strictly enforced policy boundary.
 
-**v0.9.0** · Python 3.12+ · Runs on Windows / macOS / Linux
+## Current Status
 
----
+**Phase 10 — jarvis/ Refactor (In Progress)**
 
-## What's different
+The system now runs a complete, policy-gated stack:
 
-Most AI assistants live in a chat box. JARVIS OS has a workspace it can see, files it can edit, a terminal it can use, and skills it can learn — all gated by a permissions system that stays out of your way when things are routine and asks before doing something destructive.
+- **Domain Models** (`jarvis/agent/state.py`): Typed action, observation, plan, and result objects
+- **Tool Registry** (`jarvis/tools/registry.py`): 29 tool definitions, all validated before execution
+- **Policy Engine** (`jarvis/policy/engine.py`): Risk classification, approval gates, deny/allow modes
+- **Tools** (`jarvis/tools/`): Filesystem, terminal (no shell=True), internet (SSRF blocked), memory, self-model, audit
+- **Executor** (`jarvis/tools/executor.py`): Per-action execution with error handling and dry-run support
+- **Agent Loop** (`jarvis/agent/loop.py`): Read → build context → plan → authorize → execute → observe → verify → recover
+- **Memory** (`jarvis/memory/store.py`): Markdown-first persistent memory with provenance
+- **Skills** (`jarvis/skills/`): Manifest-based skill loading with trust levels
+- **Self-Model** (`jarvis/self/model.py`): Current state tracking, capabilities, goals, failures
+- **Audit** (`jarvis/audit/`): Structured event logging
 
-The Phase 9 `core/` refactor makes every component modular, testable, and secure:
+### Verified Capabilities
 
-```
-core/
-├── utils.py          path safety (commonpath), filler stripping, JSON repair
-├── llm.py            multi-provider LLM (OpenAI / Ollama / mock fallback)
-├── supervisor.py     permission modes (auto / ask / deny), dry-run, audit trail
-├── executor.py       workspace-bound terminal, shell-free builtins
-├── filesystem.py     CRUD operations, path traversal blocked via commonpath
-├── internet.py       http/https-only web access (file:// and ftp:// blocked)
-├── memory.py         conversation history + YAML-fact storage + decision log
-├── skill_manager.py  YAML-frontmatter skills, sandboxed execution
-├── action_parser.py  extracts/repairs/validates ```action``` blocks from LLM
-├── action_executor.py supervisor-gated action routing to all handlers
-└── agent.py          thin orchestrator tying everything together
-```
+| Feature | Status | Tests |
+|---|---|---|
+| Filesystem operations | ✅ Working | 9 |
+| Terminal execution | ✅ Working | 9 |
+| Policy enforcement | ✅ Working | 4 |
+| Memory persistence | ✅ Working | 2 |
+| Audit logging | ✅ Working | 1 |
+| Self-model | ✅ Working | 1 |
+| Agent loop (O/V/R) | ✅ Working | 3 |
+| NL → action mapping | ✅ Working | 2 |
+| Test runner | ✅ Working | 1 |
+| Integration | ✅ Working | 10 |
+| **Total** | **15** | **51** |
 
-**74 pytest tests passing** · `tests/` directory with full coverage
-
----
-
-## Quick start
+## Quick Start
 
 ```bash
-# Clone the repo
-git clone <repo-url> && cd OS
+# Set workspace directory
+mkdir workspace
 
-# Install dependencies
-pip install requests beautifulsoup4 pyyaml
+# Run tests
+python -m pytest tests/
 
-# Run tests (74 tests, no LLM required)
-python -m pytest tests/ -v
+# Run the integration test
+python tests/test_integration.py
 
-# Run the agent in interactive mode (works offline with mock LLM)
-python main.py
-
-# Single command
-python main.py --once "list files"
-python main.py --once "run python --version"
-python main.py --once "remember that my name is Tony"
+# Run the full regression
+python _final_check.py
 ```
 
----
-
-## Architecture
-
-### Request flow
-
-```
-User input
-  → Memory (add to history + context)
-  → LLM (OpenAI / Ollama / mock)
-  → Action Parser (extract ```action``` blocks, JSON repair)
-  → Supervisor (permission check: auto / ask / deny / dry-run)
-  → Action Executor (dispatch to handler: filesystem, terminal, internet, skills, memory)
-  → LLM followup (summarize what was done)
-  → Memory (add response)
-  → User
-```
-
-### Offline / mock mode
-
-When no LLM backend is configured, JARVIS falls back to:
-1. **Auto-detect**: OpenAI if API key present → Ollama if localhost reachable → mock
-2. **Keyword handler**: `list files`, `read <file>`, `run <cmd>`, `list skills`, `remember that <k> is <v>`
-3. **Mock responses**: deterministic, no network required — great for testing and demos
-
----
-
-## Security model
-
-| Layer | Mechanism |
-|---|---|
-| **Path safety** | `os.path.commonpath` + `realpath` — replaces insecure `startswith()` checks |
-| **Command injection** | `sanitize_command()` rejects `;`, `|`, `\|`, backticks, `$()` |
-| **Shell disabled** | `subprocess.run(argv, shell=False)` — no shell interpretation; Windows builtins handled in-process |
-| **CWD enforcement** | `commonpath` on `realpath` values — `../` escapes blocked |
-| **Permissions** | Per-category modes: `auto` / `ask` / `deny` + auto-allow list + always-deny list |
-| **Dry-run** | `dry_run: true` in config — supervisor logs all intended actions without executing |
-| **Internet** | Only `http`/`https` schemes accepted — `file://`, `ftp://`, `javascript:` blocked |
-| **Skills** | Subprocess isolation or restricted builtins — no raw `exec()` with full access |
-
----
-
-## Configuration
-
-`config.yaml` (or `.jarvis/config.json`):
-
-```yaml
-llm:
-  provider: auto        # auto | openai | ollama | mock
-  model: auto
-  api_key: ""           # or set JARVIS_API_KEY env var
-  api_base: ""          # custom OpenAI-compatible endpoint
-  temperature: 0.2
-  retries: 3
-  backoff: 2.0
-
-permissions:
-  terminal: ask         # auto | ask | deny
-  file_write: auto
-  file_read: auto
-  file_delete: ask
-  internet: ask
-  skill: ask
-
-dry_run: false          # log all actions without executing
-```
-
----
-
-## Skills
-
-Skills are markdown files in `.jarvis/skills/` with YAML frontmatter:
-
-```markdown
----
-name: double
-description: Double a number
-params:
-  - name: x
-    type: int
-    required: true
-    description: Number to double
----
-
-Doubles the given number.
-
-```python
-def run(x, **kwargs):
-    return f"double({x}) = {x * 2}"
-```
-```
-
-Skills run in a sandboxed subprocess by default — no access to JARVIS internals.
-
----
-
-## Memory
-
-- **Conversation history**: rolling window, oldest half auto-summarized to markdown
-- **YAML facts**: `memory/facts.md` — structured key/value storage (user preferences, project context)
-- **Decision log**: `memory/decisions.md` — append-only record of what JARVIS did and why
-
----
-
-## Project structure
+## Directory Structure
 
 ```
 OS/
-├── core/                 Phase 9 modular core (see above)
-├── src/                  Legacy monolithic modules (being migrated)
-├── workspace/            User workspace — JARVIS's working directory
-│   ├── .jarvis/          Config, skills, memory
-│   ├── research/         Auto-saved web research excerpts
-│   └── *.md              User files
-├── tests/                pytest test suite (74 tests)
-├── config.yaml           Default configuration
-├── main.py               CLI entry point
-├── run.py                Legacy entry point
-├── demo_autonomous_recovery.py   E2E autonomous task demo
-└── README.md             This file
+├── jarvis/              # Core package (new, authoritative)
+│   ├── agent/           # Agent loop, state, planner
+│   ├── audit/           # Audit logging
+│   ├── config/          # Configuration loader
+│   ├── dashboard/       # Dashboard module
+│   ├── llm/             # LLM client & providers
+│   ├── memory/          # Markdown-first memory store
+│   ├── policy/          # Policy engine
+│   ├── sandbox/         # Sandbox manager
+│   ├── self/            # Self-model
+│   ├── skills/          # Skill system
+│   └── tools/           # All tools
+│       ├── filesystem.py
+│       ├── terminal.py
+│       ├── internet.py
+│       ├── memory.py
+│       ├── registry.py
+│       └── executor.py
+├── workspace/           # User workspace (auto-created)
+├── memory/               # Canonical Markdown memory
+├── tests/                # Test suite
+│   ├── test_integration.py  # Full stack test (15 checks)
+│   └── ...
+├── _check.py             # Sanity checker (legacy)
+├── _check2.py            # Sanity checker (legacy)
+├── _final_check.py       # Full regression test
+└── README.md
 ```
 
----
+## Security Model
 
-## Testing
+- **No raw execution**: LLM never executes code directly — only the tool registry can
+- **Policy gates**: Every action passes through the policy engine
+- **Fail closed**: Deny-by-default for unknown tools, write operations, ASK without handler
+- **Resource limits**: Timeouts, output caps, file size limits
+- **SSRF protection**: Blocked private/metadata IPs at DNS and redirect levels
+- **Audit trail**: Structured Markdown logging for every action
 
-```bash
-# Full test suite
-python -m pytest tests/ -v
+## Configuration
 
-# By module
-python -m pytest tests/test_utils.py -v
-python -m pytest tests/test_executor.py -v
-python -m pytest tests/test_action_parser.py -v
-python -m pytest tests/test_supervisor.py -v
-python -m pytest tests/test_filesystem.py -v
-python -m pytest tests/test_skill_manager.py -v
-python -m pytest tests/test_memory.py -v
+Edit `config.yaml`:
 
-# Smoke tests (no pytest required)
-python _smoke_core.py
-python _smoke_parser.py
-python _smoke_agent.py
-python _smoke_skills_mem_exec.py
+```yaml
+permissions:
+  filesystem: allow     # allow | ask | deny
+  terminal: ask        # allow | ask | deny
+  internet: deny       # allow | ask | deny
+  memory: allow        # allow | ask | deny
+  skill: ask           # allow | ask | deny
+  system: ask          # allow | ask | deny
+
+paths:
+  workspace: workspace
+  memory: memory
+  audit: memory/audit
+  skills: skills
 ```
 
+## Skills
+
+Skills are Markdown files with YAML frontmatter in `skills/`:
+
+```markdown
+---
+name: fetch-url
+version: 1.0.0
+description: Fetch a URL and return content
+required_tools: [internet.fetch]
+risk_level: high
+trust_level: external_unverified
 ---
 
-## License
+# fetch-url
 
-Internal project — not for distribution.
+Fetch content from any URL and return as Markdown.
+```
+
+Trust levels: `built-in`, `verified`, `user_approved`, `external_unverified`, `blocked`
+
+## Memory Model
+
+Memory is Markdown-first and human-readable:
+
+```markdown
+---
+id: ...
+type: preference
+confidence: 0.95
+source: conversation
+---
+
+# Extracted Preference
+
+The user prefers short answers unless detail is requested.
+```
+
+## Architecture Principles
+
+- **Markdown-first**: All memory/knowledge stored as `.md` files
+- **Policy gates**: Structured authorization before every action
+- **Bounded autonomy**: LLM does not control execution
+- **Observe before acting**: Read state before modifying
+- **Recover gracefully**: Errors trigger assessment, not retry loops
+- **Resource limits**: Every tool opt-in, resource-capped
+- **Auditability**: Structured logging across all layers
+
+## Current Limitations
+
+- No dashboard / visualization UI (pending)
+- No planning engine beyond natural-language mapping
+- No web search thresholds
+- No true level-5 OS isolation but sandbox interface is reproducible
+- Memory retrieval is keyword-based (no semantic search)
+- No drive-first PDF/parsing skills
+
+## Goals
+
+- [ ] Bounded autonomy with graduated approval
+- [ ] Self-update pipeline (patch, test, deploy, rollback)
+- [ ] Skill learning from observation
+- [ ] Memory decay and summarization
+- [ ] Regression testing in CI
+- [ ] Distribution as Docker image

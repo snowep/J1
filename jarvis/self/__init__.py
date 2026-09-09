@@ -1,0 +1,1 @@
+"""JARVIS self-model package — persistent state about JARVIS itself."""

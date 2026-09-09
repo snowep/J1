@@ -1,0 +1,5 @@
+write -> success=True status=success
+read -> success=True content='Hello JARVIS'
+traversal -> success=False error=Path escapes workspace: ../../etc/passwd
+unknown -> success=False error=Unknown tool: 'evil.do_stuff' — rejected
+internet -> success=False error=Blocked by policy: Permission denied for category 'internet'

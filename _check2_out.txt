@@ -1,0 +1,16 @@
+write -> success=True status=success
+read -> success=True content='Hello JARVIS'
+traversal -> success=False error=Path escapes workspace: ../../etc/passwd
+unknown -> success=False error=Unknown tool: 'evil.do_stuff' — rejected
+internet -> success=False error=Blocked by policy: Permission denied for category 'internet'
+Traceback (most recent call last):
+  File "D:\Project\OS\_check2.py", line 69, in <module>
+    r6 = exe.execute_action(a6)
+         ^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Project\OS\jarvis\tools\executor.py", line 89, in execute_action
+    decision = self.policy.evaluate_action(action)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Project\OS\jarvis\policy\engine.py", line 184, in evaluate_action
+    if mode == PermissionMode.AUTO or self._is_auto_allow(cmd):
+               ^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'PermissionMode' has no attribute 'AUTO'
