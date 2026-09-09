@@ -1,0 +1,72 @@
+[
+  {
+    "role": "user",
+    "content": "list skills",
+    "ts": "2026-09-09T06:44:06Z"
+  },
+  {
+    "role": "assistant",
+    "content": "Available skills:\n  - code_writer() — Write Python code to a file in the workspace. Use when the user asks to write a script, create a Python file, or generate code.\n  - file_crud() — Create, read, edit, delete, and list files in the workspace. Use when the user asks to create a file, read a file, edit a file, delete a file, or list files.\n  - hello_world() — Print a greeting message. Use when the user asks to use the hello world skill or greet with a custom message.\n  - hello_worlds() — no description\n  - summarize() — Summarize a file or list the existing summaries. Use when the user asks to summarize a file or list summaries.",
+    "ts": "2026-09-09T06:44:06Z"
+  },
+  {
+    "role": "user",
+    "content": "list files",
+    "ts": "2026-09-09T06:44:15Z"
+  },
+  {
+    "role": "assistant",
+    "content": "- Ironman.md\n- _test_terminal_log.json\n- api_draft.md\n- debug.md\n- demo.md\n- hello.py\n- index.md\n- log.md\n- plan_test.md\n- project_notes.md\n- recovery_demo_20260909_050717.md\n- recovery_demo_20260909_050846.md\n- recovery_demo_20260909_051119.md\n- recovery_demo_20260909_051320.md\n- recovery_demo_20260909_051340.md\n- recovery_demo_20260909_051550.md\n- report.md\n- research\n- setup.md\n- summaries\n- summary.md\n- terminal_log.json",
+    "ts": "2026-09-09T06:44:15Z"
+  },
+  {
+    "role": "user",
+    "content": "read README.md",
+    "ts": "2026-09-09T06:44:15Z"
+  },
+  {
+    "role": "assistant",
+    "content": "⚠️ File not found: README.md",
+    "ts": "2026-09-09T06:44:15Z"
+  },
+  {
+    "role": "user",
+    "content": "remember that user_name is Tony",
+    "ts": "2026-09-09T06:44:15Z"
+  },
+  {
+    "role": "assistant",
+    "content": "✅ Remembered: user_name = Tony",
+    "ts": "2026-09-09T06:44:15Z"
+  },
+  {
+    "role": "user",
+    "content": "what was that name?",
+    "ts": "2026-09-09T06:44:15Z"
+  },
+  {
+    "role": "assistant",
+    "content": "(offline mode — no LLM backend) I can: list files, read <file>, run <cmd>, list skills, remember that <k> is <v>. You said: what was that name?",
+    "ts": "2026-09-09T06:44:15Z"
+  },
+  {
+    "role": "user",
+    "content": "run echo hello-from-jarvis",
+    "ts": "2026-09-09T06:44:15Z"
+  },
+  {
+    "role": "assistant",
+    "content": "hello-from-jarvis",
+    "ts": "2026-09-09T06:44:15Z"
+  },
+  {
+    "role": "user",
+    "content": "list skills",
+    "ts": "2026-09-09T06:44:15Z"
+  },
+  {
+    "role": "assistant",
+    "content": "Available skills:\n  - code_writer() — Write Python code to a file in the workspace. Use when the user asks to write a script, create a Python file, or generate code.\n  - file_crud() — Create, read, edit, delete, and list files in the workspace. Use when the user asks to create a file, read a file, edit a file, delete a file, or list files.\n  - hello_world() — Print a greeting message. Use when the user asks to use the hello world skill or greet with a custom message.\n  - hello_worlds() — no description\n  - summarize() — Summarize a file or list the existing summaries. Use when the user asks to summarize a file or list summaries.",
+    "ts": "2026-09-09T06:44:15Z"
+  }
+]

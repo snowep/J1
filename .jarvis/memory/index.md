@@ -1,6 +1,6 @@
 # Memory Index
 
-*Last updated: 2026-09-09 01:57:59 UTC*
+*Last updated: 2026-09-09 05:15:50 UTC*
 
 ---
 
@@ -20,4 +20,7 @@
 ## Other
 
 - [[README.md]] - Readme
+- [[error_log.md]] - Error Log
+- [[error_patterns.json]] - Error Patterns.Json
+- [[lessons_learned.md]] - Lessons Learned
 

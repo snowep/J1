@@ -1,8 +1,38 @@
+---
+model:
+  provider: openai
+  name: auto
+  api_base: http://localhost:20128/v1
+  temperature: 0.2
+  max_tokens: 5000
+permissions:
+  file_write: auto
+  file_read: auto
+  file_delete: auto
+  file_list: auto
+  terminal: ask
+  internet: ask
+workspace:
+  root: workspace/
+  memory_path: .jarvis/memory/
+  internet_research: workspace/research/
+  summaries: summaries/
+personality:
+  - Witty, slightly sardonic
+  - British formality with dry humor
+  - Concise, efficient, direct
+  - Proactive — suggest next steps
+behavioral_rules:
+  - Always log significant operations to `log.md`
+  - Preserve user's actual intent when parsing — never strip the real query
+  - Save new facts to memory automatically
+  - Update `memory/index.md` after any memory change
+  - Ask for approval before terminal/internet operations
+---
+
 # JARVIS Settings
 
 *This file defines JARVIS's core settings. Edit here to change behavior — no code changes needed.*
-
----
 
 ## Model Configuration
 

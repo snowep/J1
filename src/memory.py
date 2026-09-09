@@ -236,6 +236,10 @@ Steps:
             if filename:
                 if not filename.endswith('.md'):
                     alternatives.append(action.replace(filename, f"{filename}.md"))
+                # Try swapping a non-md extension (report.txt → report.md)
+                base, ext = os.path.splitext(filename)
+                if ext and ext != '.md':
+                    alternatives.append(action.replace(filename, base + '.md'))
                 alternatives.append(action.replace(filename, filename.lower()))
                 alternatives.append(action.replace(filename, filename.title()))
 
@@ -254,6 +258,10 @@ Steps:
         cleaned = re.sub(r'\s+', ' ', cleaned).strip()
         if cleaned != action and len(cleaned.split()) >= 2:
             alternatives.append(cleaned)
+
+        # Remove duplicates while preserving order
+        seen = set()
+        alternatives = [a for a in alternatives if not (a in seen or seen.add(a))]
 
         return alternatives
 
@@ -313,6 +321,13 @@ Steps:
             # ── RUN / EXECUTE ──────────────────────────────
             if re.match(r'^(run|execute|python|pip|git)\b', action_l):
                 cmd = action
+                # Prefer natural-language translation (e.g. "push changes" → "git push")
+                if hasattr(self.agent, '_translate_to_command'):
+                    translated = self.agent._translate_to_command(action)
+                    if translated:
+                        cmd = translated
+                # Strip leading 'run'/'execute' verb: "run python hello.py" → "python hello.py"
+                cmd = re.sub(r'^(?:run|execute)\s+', '', cmd, flags=re.I).strip() or action
                 result = self.te.execute(cmd)
                 if result['status'] == 'success':
                     return {'action': action, 'summary': f'Ran: {cmd[:40]}', 'output': result.get('stdout', '')[:100], 'success': True}
@@ -362,4 +377,10 @@ Steps:
         m = re.search(r'(\w+)\.(md|txt|py|json)', text, re.I)
         if m:
             return f'{m.group(1)}.{m.group(2)}'
+        # Fallback: allow bare filenames like "read report" (no extension)
+        m = re.search(r'([a-zA-Z0-9_][a-zA-Z0-9_\-.]*)\s*$', text.strip())
+        if m:
+            word = m.group(1)
+            if word.lower() not in ('files', 'file', 'folder', 'directory', 'status', 'the', 'all', 'everything', 'content', 'placeholder'):
+                return word
         return None

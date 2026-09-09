@@ -1,0 +1,45 @@
+# JARVIS OS — Phase 9 configuration
+
+# ── LLM backend ─────────────────────────────────────────────────────────────
+# provider: auto | openai | ollama | mock
+#   auto  -> openai if api_key+api_base set, else ollama if reachable, else mock
+#   mock  -> deterministic offline fallback (no network)
+llm:
+  provider: auto
+  model: auto                 # auto -> first available model
+  api_key: ""                 # set via env JARVIS_API_KEY or here (never commit)
+  api_base: ""                # custom OpenAI-compatible endpoint
+  temperature: 0.2
+  max_tokens: 2000
+  retries: 3
+  backoff: 2.0
+  timeout: 30
+
+# ── Supervisor permissions ─────────────────────────────────────────────────────
+# modes: auto | ask | deny
+permissions:
+  terminal: ask
+  file_write: auto
+  file_read: auto
+  file_edit: auto
+  file_append: auto
+  file_delete: ask
+  file_list: auto
+  internet: ask
+  skill: ask
+  memory: auto
+  agent: ask
+
+# ── Dry run (test mode: log actions but don't execute) ────────────────────────
+dry_run: false
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
+paths:
+  workspace: workspace
+  skills: .jarvis/skills
+  memory: .jarvis/memory
+
+# ── Memory ────────────────────────────────────────────────────────────────────
+memory:
+  max_history: 20           # max messages kept
+  summarize_threshold: 20   # summarize oldest half when history exceeds this

@@ -7,8 +7,8 @@
     "fix": "Use direct open() instead of FileManager for .jarvis/ paths",
     "lesson": "Never use FileManager for files outside workspace/ — use os.open() directly",
     "first_seen": "2026-09-09 02:45 UTC",
-    "last_seen": "2026-09-09 02:46 UTC",
-    "occurrences": 3
+    "last_seen": "2026-09-09 05:15 UTC",
+    "occurrences": 12
   },
   "err_a8407e0e": {
     "command_pattern": "filemanager writes to WORKSPACE/",
@@ -18,8 +18,8 @@
     "fix": "FileManager always prepends workspace_path to relative paths",
     "lesson": "For .jarvis/ files, bypass FileManager and write directly",
     "first_seen": "2026-09-09 02:45 UTC",
-    "last_seen": "2026-09-09 02:46 UTC",
-    "occurrences": 2
+    "last_seen": "2026-09-09 05:15 UTC",
+    "occurrences": 11
   },
   "err_17b41566": {
     "command_pattern": "edit skill file FILE.md",
@@ -29,8 +29,8 @@
     "fix": "Edit command for skill files was routing to skill_create instead of skill_edit",
     "lesson": "Add skill_edit intent category that intercepts before generic edit",
     "first_seen": "2026-09-09 02:45 UTC",
-    "last_seen": "2026-09-09 02:46 UTC",
-    "occurrences": 2
+    "last_seen": "2026-09-09 05:15 UTC",
+    "occurrences": 11
   },
   "err_4646add0": {
     "command_pattern": "unicode emoji in skill code execution",
@@ -40,8 +40,8 @@
     "fix": "Windows subprocess defaults to system encoding, not UTF-8",
     "lesson": "Always set PYTHONIOENCODING=utf-8 in subprocess env",
     "first_seen": "2026-09-09 02:45 UTC",
-    "last_seen": "2026-09-09 02:46 UTC",
-    "occurrences": 2
+    "last_seen": "2026-09-09 05:15 UTC",
+    "occurrences": 11
   },
   "err_788a3ae7": {
     "command_pattern": "windows file lock on temp files",
@@ -51,8 +51,8 @@
     "fix": "NamedTemporaryFile with delete=False keeps handle open",
     "lesson": "Use mkstemp() + os.fdopen() instead of NamedTemporaryFile on Windows",
     "first_seen": "2026-09-09 02:45 UTC",
-    "last_seen": "2026-09-09 02:46 UTC",
-    "occurrences": 2
+    "last_seen": "2026-09-09 05:15 UTC",
+    "occurrences": 11
   },
   "err_b8b01217": {
     "command_pattern": "skill name with spaces vs underscores",
@@ -62,8 +62,8 @@
     "fix": "User types space-separated names but skill files use underscores",
     "lesson": "Normalize spaces to underscores in skill name matching",
     "first_seen": "2026-09-09 02:45 UTC",
-    "last_seen": "2026-09-09 02:46 UTC",
-    "occurrences": 2
+    "last_seen": "2026-09-09 05:15 UTC",
+    "occurrences": 11
   },
   "err_efd63129": {
     "command_pattern": "edit skill FILE.md",
