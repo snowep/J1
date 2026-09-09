@@ -416,13 +416,16 @@ Use this to reference stored notes and facts."""
                 f'```\n'
             )
         
-        # Write the skill file
-        result = self.fm.write(skill_path, content, overwrite=True)
-        if result['success']:
+        # Write the skill file directly (not via FileManager, which prepends workspace/)
+        try:
+            os.makedirs(os.path.dirname(skill_path), exist_ok=True)
+            with open(skill_path, 'w', encoding='utf-8') as f:
+                f.write(content)
             self.skill_manager.refresh()  # Reload skills
             self._log_activity("Skill", f"Created skill: {skill_name}")
             return f"✅ Created skill '{skill_name}' at {skill_path}\n\nUse it with: 'use the {skill_name} skill'"
-        return f"❌ Failed to create skill: {result.get('error', '')}"
+        except Exception as e:
+            return f"❌ Failed to create skill: {e}"
 
     def _handle_learn(self, text):
         m = re.search(r'\b(remember|learn)\s+(?:that\s+)?(.+?)\s+(?:is|equals?)\s+(.+)', text, re.I)

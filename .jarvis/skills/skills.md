@@ -9,6 +9,7 @@
 | Skill | File | Description |
 |-------|------|-------------|
 | `hello_world` | [hello_world.md](hello_world.md) | Print a greeting message |
+| `hello_worlds` | [hello_worlds.md](hello_worlds.md) | Print a greeting message (user-created) |
 | `file_crud` | [file_crud.md](file_crud.md) | Create, read, edit, delete, list files |
 | `summarize` | [summarize.md](summarize.md) | Summarize a file or list summaries |
 | `code_writer` | [code_writer.md](code_writer.md) | Write Python code to a file |
