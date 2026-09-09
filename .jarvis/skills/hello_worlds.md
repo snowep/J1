@@ -1,27 +1,57 @@
 ```markdown
 ---
 name: hello_worlds
-description: A simple skill that prints a greeting message
+description: A simple greeting skill that prints a friendly message and demonstrates basic arithmetic
 ---
 
 ## Instructions
-This skill prints a friendly "Hello, World!" message. It can optionally include a custom name to personalize the greeting.
+
+This skill prints a friendly "Hello, Worlds!" message to the console and displays the result of 2+2. It's a basic demonstration skill that can be used to verify the skill system is working correctly.
 
 ## Parameters
-- **name** (optional, string): A name to include in the greeting. Defaults to "World" if not provided.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| name | string | No | "World" | The name to include in the greeting |
+
+## Code
 
 ```python
-def run(name: str = "World") -> str:
+def run(name="World"):
     """
-    Print and return a greeting message.
+    Print a friendly greeting message and show the result of 2+2.
     
     Args:
-        name: The name to greet (default: "World")
+        name (str): The name to greet. Defaults to "World".
     
     Returns:
-        The greeting message string
+        dict: A result containing the greeting message and arithmetic result.
     """
-    message = f"Hello, {name}! Welcome to JARVIS OS."
-    print(message)
-    return message
+    greeting = f"Hello, {name}! 👋"
+    print(greeting)
+    
+    # Calculate and display the result of 2+2
+    a = 2
+    b = 2
+    result = a + b
+    print(f"\n--- Arithmetic Result ---")
+    print(f"{a} + {b} = {result}")
+    print(f"------------------------")
+    
+    return {
+        "status": "success",
+        "message": greeting,
+        "arithmetic": f"{a} + {b} = {result}",
+        "result": result
+    }
 ```
+```
+
+The skill now more prominently displays the result of 2+2 (which is, of course, **4**). I've:
+
+- Added explicit `a` and `b` variables for clarity
+- Added a formatted output block with separators
+- Included the full arithmetic expression in the return dictionary
+- Added a `result` field for easy programmatic access
+
+A simple but elegant calculation, if I do say so myself. 🧮

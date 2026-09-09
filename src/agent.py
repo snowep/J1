@@ -4,6 +4,7 @@ from src.file_manager import FileManager
 from src.terminal_executor import TerminalExecutor
 from src.memory import Memory, AutonomousPlanner
 from src.skills import SkillManager
+from src.error_memory import ErrorMemory
 from src.internet import Internet
 from src.summarizer import Summarizer
 
@@ -41,6 +42,73 @@ class Agent:
         
         # Load skill manager for model-invokable skills
         self.skill_manager = SkillManager()
+        
+        # Load error memory — auto-recall fixes, auto-record new errors
+        self.error_memory = ErrorMemory()
+        self._seed_known_errors()
+
+    def _seed_known_errors(self):
+        """Seed error memory with known bugs from this session."""
+        known = [
+            (
+                'create skill in .jarvis/skills/',
+                'File not found workspace/.jarvis/skills/hello_world.md',
+                'Use direct open() instead of FileManager for .jarvis/ paths',
+                'Never use FileManager for files outside workspace/ — use os.open() directly'
+            ),
+            (
+                'FileManager writes to workspace/',
+                'path is prepended with workspace/',
+                'FileManager always prepends workspace_path to relative paths',
+                'For .jarvis/ files, bypass FileManager and write directly'
+            ),
+            (
+                'edit skill file hello_worlds.md',
+                'File not found or skill already exists error on edit',
+                'Edit command for skill files was routing to skill_create instead of skill_edit',
+                'Add skill_edit intent category that intercepts before generic edit'
+            ),
+            (
+                'Unicode emoji in skill code execution',
+                'charmap codec cannot encode character',
+                'Windows subprocess defaults to system encoding, not UTF-8',
+                'Always set PYTHONIOENCODING=utf-8 in subprocess env'
+            ),
+            (
+                'Windows file lock on temp files',
+                'process cannot access the file because it is being used by another process',
+                'NamedTemporaryFile with delete=False keeps handle open',
+                'Use mkstemp() + os.fdopen() instead of NamedTemporaryFile on Windows'
+            ),
+            (
+                'Skill name with spaces vs underscores',
+                'hello world does not match hello_world',
+                'User types space-separated names but skill files use underscores',
+                'Normalize spaces to underscores in skill name matching'
+            ),
+        ]
+        for command, error, fix, lesson in known:
+            # Only seed if not already present
+            existing = self.error_memory.check_before_action(command)
+            if not existing.get('match'):
+                self.error_memory.record_error(command, error, fix=fix, lesson=lesson)
+
+    def _check_error_memory(self, command):
+        """Check if an action matches a known error. Returns warning or None."""
+        result = self.error_memory.check_before_action(command)
+        if result.get('match'):
+            warning = f"⚠️ **Known error detected** (seen {result['occurrences']}x):\n"
+            warning += f"  Error: {result.get('original_error', '?')}\n"
+            if result.get('fix') and result['fix'] != 'pending':
+                warning += f"  Fix: {result['fix']}\n"
+            if result.get('lesson') and result['lesson'] != 'pending':
+                warning += f"  Lesson: {result['lesson']}\n"
+            return warning
+        return None
+
+    def _record_error_if_new(self, command, error_msg, fix=None, lesson=None):
+        """Record an error and its fix for future recall."""
+        self.error_memory.record_error(command, error_msg, fix=fix, lesson=lesson)
 
     def _log_activity(self, operation, details):
         timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
@@ -427,6 +495,55 @@ Use this to reference stored notes and facts."""
         except Exception as e:
             return f"❌ Failed to create skill: {e}"
 
+    def _handle_skill_edit(self, text):
+        """Edit a skill file in .jarvis/skills/."""
+        # Extract skill name from path
+        m = re.search(r'skills?/([\w_-]+)\.md', text, re.I)
+        if m:
+            skill_name = m.group(1)
+        else:
+            m2 = self._extract_filename(text)
+            skill_name = m2.replace('.md', '') if m2 else None
+
+        if not skill_name:
+            return "❌ Couldn't determine skill name. Use: 'edit skills/my_skill.md'"
+
+        skill_path = os.path.join('.jarvis', 'skills', f'{skill_name}.md')
+        if not os.path.exists(skill_path):
+            return f"❌ Skill file not found: {skill_path}. Available: {', '.join(self.skill_manager.list_skills())}"
+
+        # Extract what to change
+        old_match = re.search(r'(?:change|replace|update)\s+["\'](.+?)["\']\s+(?:to|with)\s+["\'](.+?)["\']', text, re.I)
+        if old_match:
+            old_text, new_text = old_match.group(1), old_match.group(2)
+            with open(skill_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            content = content.replace(old_text, new_text, 1)
+            with open(skill_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            self.skill_manager.refresh()
+            self._log_activity("Skill", f"Edited skill: {skill_name} (replaced '{old_text}' with '{new_text}')")
+            return f"✅ Edited skill '{skill_name}': replaced '{old_text}' with '{new_text}'"
+
+        # No specific change specified — use LLM to rewrite
+        with open(skill_path, 'r', encoding='utf-8') as f:
+            current = f.read()
+
+        new_content = self._call_llm_with_memory(
+            f"Edit the skill file '{skill_name}.md' based on this request: {text}\n\n"
+            f"Current content:\n{current}\n\n"
+            f"Return the COMPLETE updated skill markdown file with YAML frontmatter, instructions, parameters, and code block."
+        )
+
+        if new_content.startswith('Error') or not new_content.strip():
+            return f"❌ Failed to generate edit: {new_content}"
+
+        with open(skill_path, 'w', encoding='utf-8') as f:
+            f.write(new_content)
+        self.skill_manager.refresh()
+        self._log_activity("Skill", f"Rewrote skill: {skill_name}")
+        return f"✅ Rewrote skill '{skill_name}' at {skill_path}"
+
     def _handle_learn(self, text):
         m = re.search(r'\b(remember|learn)\s+(?:that\s+)?(.+?)\s+(?:is|equals?)\s+(.+)', text, re.I)
         if m:
@@ -462,9 +579,19 @@ Use this to reference stored notes and facts."""
             for sk in self.skill_manager.list_skills():
                 if sk in raw.lower().replace(' ', '_'):
                     return ('skill', sk, {'action': 'run'})
-        # Skill creation detection
-        if re.search(r'\b(?:create|make|write|build)\s+(?:a\s+)?(?:new\s+)?skill', text_l) or \
-           re.search(r'\bskills?/[\w_-]+\.md\b', text):
+        # Skill creation detection — only when explicitly creating
+        if re.search(r'\b(?:create|make|write|build)\s+(?:a\s+)?(?:new\s+)?skill', text_l):
+            return ('skill_create', text, {})
+        # Skill file editing — edit/view/delete skills/xxx.md
+        if re.search(r'\b(?:edit|view|read|show|delete|modify|change)\b.*skills?/[\w_-]+\.md', text_l):
+            return ('skill_edit', text, {})
+        # Skill file editing — edit hello_worlds.md (recognize skill filenames)
+        if re.search(r'\b(?:edit|view|read|show|delete|modify|change)\b.*[\w_-]+\.md', text_l):
+            m = self._extract_filename(text)
+            if m and any(m.startswith(s) for s in ['hello_world', 'code_writer', 'file_crud', 'summarize']):
+                return ('skill_edit', text, {})
+        # Bare skill file reference like skills/hello_worlds.md (create only if combined with create words)
+        if re.search(r'\bskills?/[\w_-]+\.md\b', text) and re.search(r'\b(?:create|make|write|new)\b', text_l):
             return ('skill_create', text, {})
         if any(k in text_l for k in ['list skills', 'available skills', 'show skills', 'what skills', 'what can you do']):
             return ('skill', None, {'action': 'list'})
@@ -607,23 +734,40 @@ Use this to reference stored notes and facts."""
         if not user_input:
             return "Enter a command."
         op, target, params = self._detect_command(user_input)
-        return {
-            'create': lambda: self._handle_create(user_input, target),
-            'read': lambda: self._handle_read(target),
-            'edit': lambda: self._handle_edit(user_input, target),
-            'delete': lambda: self._handle_delete(target),
-            'list': self._handle_list,
-            'terminal': lambda: self._handle_terminal(target, params.get('translated', False)),
-            'internet_toggle': lambda: self._handle_internet_toggle(user_input),
-            'browse': lambda: self._handle_browse(user_input),
-            'summarize': lambda: self._handle_summarize(user_input),
-            'autonomous': lambda: self._handle_autonomous(user_input),
-            'learn': lambda: self._handle_learn(user_input),
-            'capabilities': lambda: self._handle_capabilities(),
-            'skill': lambda: self._handle_skill(target, params),
-            'skill_create': lambda: self._handle_skill_create(user_input),
-            'chat': lambda: self._handle_chat(user_input)
-        }[op]()
+        
+        # ── AUTO-RECALL: Check error memory before executing ──
+        warning = self._check_error_memory(user_input)
+        
+        # Execute the action
+        try:
+            result = {
+                'create': lambda: self._handle_create(user_input, target),
+                'read': lambda: self._handle_read(target),
+                'edit': lambda: self._handle_edit(user_input, target),
+                'delete': lambda: self._handle_delete(target),
+                'list': self._handle_list,
+                'terminal': lambda: self._handle_terminal(target, params.get('translated', False)),
+                'internet_toggle': lambda: self._handle_internet_toggle(user_input),
+                'browse': lambda: self._handle_browse(user_input),
+                'summarize': lambda: self._handle_summarize(user_input),
+                'autonomous': lambda: self._handle_autonomous(user_input),
+                'learn': lambda: self._handle_learn(user_input),
+                'capabilities': lambda: self._handle_capabilities(),
+                'skill': lambda: self._handle_skill(target, params),
+                'skill_create': lambda: self._handle_skill_create(user_input),
+                'skill_edit': lambda: self._handle_skill_edit(user_input),
+                'chat': lambda: self._handle_chat(user_input)
+            }[op]()
+        except Exception as e:
+            # ── AUTO-RECORD: Log new errors for future recall ──
+            self._record_error_if_new(user_input, str(e))
+            result = f"❌ Error: {e}"
+        
+        # Prepend warning if a known error pattern matched
+        if warning and not str(result).startswith('⚠️'):
+            result = f"{warning}\n\nProceeding...\n{result}"
+        
+        return result
 
 
 if __name__ == "__main__":
