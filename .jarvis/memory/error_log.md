@@ -45,3 +45,9 @@
 **Error**: File not found
 **Fix**: Use skill_edit handler
 **Lesson**: Edit commands for skills need dedicated handler
+
+## [2026-09-09 02:57 UTC] err_a5480546
+**Command**: `skill edit creates spurious to.md file`
+**Error**: edit skills/hello_worlds.md creates to.md in skills/
+**Fix**: Skill edit _extract_filename was too greedy, grabbing common words like to/from/as
+**Lesson**: Skill edit must validate filename is a real skill name, not a stop word
