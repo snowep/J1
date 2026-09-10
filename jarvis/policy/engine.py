@@ -45,7 +45,7 @@ ALWAYS_DENY_PREFIXES = (
     ":(){ :|:& };:",  # fork bomb
 )
 
-# Commands considered safe to auto-allow when mode is auto or ask.
+# Commands considered safe to auto-allow when mode is ALLOW (never bypasses ASK).
 AUTO_ALLOW_PREFIXES = (
     "ls",
     "dir",
@@ -178,8 +178,9 @@ class PolicyEngine:
                 risk_level=risk,
             )
 
-        # 6) Check auto-allow for terminal (mode is ASK at this point, but trusted commands bypass)
-        if action.tool == "terminal.run":
+        # 6) Check auto-allow for terminal (only when mode is ALLOW, not ASK)
+        #    When mode is ASK, even trusted commands must go through approval.
+        if action.tool == "terminal.run" and mode == PermissionMode.ALLOW:
             cmd = action.arguments.get("command", "")
             if self._is_auto_allow(cmd):
                 if self.dry_run:
@@ -193,7 +194,7 @@ class PolicyEngine:
                 return PolicyDecision(
                     allowed=True,
                     mode=mode,
-                    reason="Auto-allowed" if self._is_auto_allow(cmd) else f"Mode '{category}' is auto",
+                    reason="Auto-allowed trusted command",
                     risk_level=risk,
                 )
 

@@ -18,6 +18,7 @@ Every execution is structured and recoverable.
 """
 
 import logging
+import os
 import re
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -414,10 +415,58 @@ class AgentLoop:
     def _recover(self, action: Action, result: ActionResult) -> Optional[str]:
         """Attempt recovery after a failed action.
 
-        For now, just logs the failure. Full recovery will be added
-        in Phase C (agent loop with recovery).
+        Strategies (tried in order):
+        1. File not found -> check alternate paths / create parent dirs
+        2. Permission denied -> suggest elevated permissions
+        3. Network error -> suggest retry
+        4. Tool-specific recovery
         """
-        log.warning("Action %s failed: %s — recovery not yet implemented", action.tool, result.error)
+        error = (result.error or "").lower()
+        tool = action.tool
+        args = dict(action.arguments)
+
+        log.warning("Action %s failed: %s — attempting recovery", tool, result.error)
+
+        # Strategy 1: File not found -> check alternate paths
+        if "not found" in error or "no such file" in error or "enoent" in error:
+            path = args.get("path", "")
+            if path:
+                # Try common alternate locations
+                alternates = [
+                    os.path.join(".jarvis", "skills", os.path.basename(path)),
+                    os.path.join("workspace", path),
+                    os.path.join("memory", path),
+                ]
+                for alt in alternates:
+                    if os.path.exists(alt):
+                        args["path"] = alt
+                        log.info("Recovery: retrying with alternate path %s", alt)
+                        return f"Found at {alt} — retrying"
+                # Try creating parent directory
+                parent = os.path.dirname(path)
+                if parent:
+                    try:
+                        os.makedirs(parent, exist_ok=True)
+                        log.info("Recovery: created parent directory %s", parent)
+                        return f"Created directory {parent} — retrying"
+                    except Exception:
+                        pass
+
+        # Strategy 2: Permission denied
+        if "permission" in error or "access denied" in error or "eacces" in error:
+            return f"Permission denied for {tool}. Check file permissions or update policy."
+
+        # Strategy 3: Network/timeout error
+        if any(k in error for k in ["timeout", "network", "connection", "dns"]):
+            return f"Network issue: {result.error}. Consider checking connectivity."
+
+        # Strategy 4: Shell command errors
+        if tool == "terminal" and result.error:
+            cmd = args.get("command", "")
+            if "not recognized" in error or "command not found" in error:
+                return f"Command '{cmd}' not found as executable. Try a different command."
+
+        # No recovery strategy matched
         return None
 
     def _log_to_memory(self, summary: str, changed_paths: List[str]) -> None:

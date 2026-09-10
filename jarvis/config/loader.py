@@ -2,6 +2,13 @@
 Configuration loader — authoritative config with validation.
 
 Invalid security-sensitive configuration stops startup.
+
+Discovery order (later files override earlier):
+  1. Explicit path
+  2. .jarvis/settings.md (YAML frontmatter — primary)
+  3. .jarvis/config.json (JSON — secondary)
+  4. config.yaml (legacy)
+  5. config.json (legacy)
 """
 
 import json
@@ -71,18 +78,36 @@ class Config:
 
     @classmethod
     def load(cls, path: Optional[str] = None) -> "Config":
-        """Load config from a file path, or discover default locations."""
+        """Load config from a file path, or discover default locations.
+
+        Discovery order (later files override earlier):
+        1. Explicit path
+        2. .jarvis/settings.md (YAML frontmatter — primary)
+        3. .jarvis/config.json (JSON — secondary)
+        4. config.yaml (legacy)
+        5. config.json (legacy)
+        """
         data = {}
 
-        # Try the specified path first
+        # 1. Try the specified path first
         if path and os.path.exists(path):
-            data = cls._load_file(path)
-        else:
-            # Try default locations
-            for candidate in ("config.yaml", "config/config.yaml", ".jarvis/config.json"):
-                if os.path.exists(candidate):
-                    data = cls._load_file(candidate)
-                    break
+            file_data = cls._load_file(path)
+            if file_data:
+                data = cls._deep_merge(data, file_data)
+
+        # 2. Discover all default locations (later overrides earlier)
+        candidates = [
+            ".jarvis/settings.md",
+            ".jarvis/config.json",
+            "config.yaml",
+            "config.json",
+        ]
+        for candidate in candidates:
+            if os.path.exists(candidate):
+                file_data = cls._load_file(candidate)
+                if file_data:
+                    data = cls._deep_merge(data, file_data)
+                    log.info("Merged config from: %s", candidate)
 
         # Merge with defaults
         merged = cls._deep_merge(DEFAULTS.copy(), data)
@@ -94,13 +119,28 @@ class Config:
 
     @classmethod
     def _load_file(cls, path: str) -> Dict[str, Any]:
-        """Load a config file (YAML or JSON)."""
+        """Load a config file (JSON, YAML, or Markdown with YAML frontmatter)."""
         try:
             with open(path, "r", encoding="utf-8") as f:
-                if path.endswith(".json"):
-                    return json.load(f)
-                else:
-                    return yaml.safe_load(f) or {}
+                content = f.read()
+
+            # Handle Markdown with YAML frontmatter
+            if path.endswith(".md") and content.startswith("---"):
+                parts = content.split("---", 2)
+                if len(parts) >= 3:
+                    return yaml.safe_load(parts[1]) or {}
+                return yaml.safe_load(content) or {}
+
+            # Handle plain YAML
+            if path.endswith(".yaml") or path.endswith(".yml"):
+                return yaml.safe_load(content) or {}
+
+            # Handle JSON
+            if path.endswith(".json"):
+                return json.loads(content)
+
+            # Try YAML as default
+            return yaml.safe_load(content) or {}
         except Exception as e:
             log.warning("Failed to load config from %s: %s", path, e)
             return {}
@@ -126,7 +166,7 @@ class Config:
         # Validate permissions — accept 'auto' as legacy alias for 'allow'
         perms = self._data.get("permissions", {})
         for category, mode in perms.items():
-            normalized = mode.lower()
+            normalized = mode.lower() if isinstance(mode, str) else str(mode)
             if normalized == "auto":
                 normalized = "allow"  # legacy alias
             if normalized not in VALID_PERMISSION_MODES:
@@ -137,6 +177,17 @@ class Config:
             # Write back normalized value
             perms[category] = normalized
 
+        # Validate LLM section
+        llm = self._data.get("llm", {})
+        if "temperature" in llm:
+            temp = llm["temperature"]
+            if not isinstance(temp, (int, float)) or temp < 0 or temp > 2.0:
+                raise ConfigError(f"LLM temperature must be between 0.0 and 2.0, got: {temp}")
+        if "max_tokens" in llm:
+            mt = llm["max_tokens"]
+            if not isinstance(mt, int) or mt < 100:
+                raise ConfigError(f"LLM max_tokens must be at least 100, got: {mt}")
+
         # Validate memory settings
         mem = self._data.get("memory", {})
         if "max_history" in mem:
@@ -144,8 +195,40 @@ class Config:
             if not isinstance(val, int) or val < 1:
                 raise ConfigError(f"memory.max_history must be a positive integer, got: {val}")
 
+        # Validate security settings
+        security = self._data.get("security", {})
+        if "max_plan_actions" in security:
+            mpa = security["max_plan_actions"]
+            if not isinstance(mpa, int) or mpa < 1 or mpa > 100:
+                raise ConfigError(f"security.max_plan_actions must be between 1 and 100, got: {mpa}")
+
+    @property
+    def permissions(self) -> Dict[str, str]:
+        """Return the normalized permissions dict."""
+        perms = dict(self._data.get("permissions", {}))
+        # Normalize 'auto' to 'allow'
+        for k in perms:
+            if perms[k] == "auto":
+                perms[k] = "allow"
+        return perms
+
+    @property
+    def llm(self) -> Dict[str, Any]:
+        """Return LLM configuration."""
+        return dict(self._data.get("llm", {}))
+
+    @property
+    def paths(self) -> Dict[str, str]:
+        """Return path configuration."""
+        return dict(self._data.get("paths", {}))
+
+    @property
+    def security(self) -> Dict[str, Any]:
+        """Return security configuration."""
+        return dict(self._data.get("security", {}))
+
     def get(self, key: str, default: Any = None) -> Any:
-        """Get a config value using dot notation: 'llm.provider'."""
+        """Get a config value by dot-separated key path."""
         parts = key.split(".")
         current = self._data
         for part in parts:
@@ -157,32 +240,8 @@ class Config:
 
     def section(self, name: str) -> Dict[str, Any]:
         """Get a top-level config section."""
-        return self._data.get(name, {})
-
-    @property
-    def llm(self) -> Dict[str, Any]:
-        return self.section("llm")
-
-    @property
-    def permissions(self) -> Dict[str, str]:
-        return self.section("permissions")
-
-    @property
-    def paths(self) -> Dict[str, str]:
-        return self.section("paths")
-
-    @property
-    def memory_config(self) -> Dict[str, Any]:
-        return self.section("memory")
-
-    @property
-    def security(self) -> Dict[str, Any]:
-        return self.section("security")
-
-    @property
-    def dry_run(self) -> bool:
-        return self.security.get("dry_run", False)
+        return dict(self._data.get(name, {}))
 
     def to_dict(self) -> Dict[str, Any]:
         """Return the full config as a dict."""
-        return self._data.copy()
+        return dict(self._data)

@@ -1,18 +1,59 @@
 # Python
 __pycache__/
 *.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
 *.egg-info/
-.venv/
-venv/
+dist/
+build/
 
-# JARVIS runtime artifacts
-workspace/terminal_log.json
-workspace/log.md
-workspace/*.md
-workspace/research/
-workspace/summaries/
-summaries/
+# Virtual env
+venv/
+.venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+._*
 
 # OS
 .DS_Store
 Thumbs.db
+
+# JARVIS runtime artifacts
+memory/audit/*.md.tmp
+memory/sessions/*.tmp
+memory/self-model/*.tmp
+memory/errors/*.tmp
+memory/web/*.tmp
+
+# Development scratch
+_*.py
+_cleanup.py
+_check*.py
+_baseline*.py
+_*.txt
+
+# Logs
+*.log
+*.tmp
+
+# Sensitive
+*.key
+*.pem
+config.local.yaml
+.env
+.env.local
+
+# Docker
+.dockerignore
+Dockerfile
+.docker/

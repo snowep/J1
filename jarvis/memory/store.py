@@ -381,3 +381,131 @@ class MemoryStore:
                 files.append((mtime, title))
         files.sort(reverse=True)
         return [title for _, title in files[:max_entries]]
+
+    def save_session(
+        self,
+        session_id: str,
+        title: str,
+        messages: List[Dict[str, Any]],
+        summary: Optional[str] = None,
+    ) -> Optional[str]:
+        """Save a conversation session to memory.
+
+        Returns the path of the saved file, or None on failure.
+        """
+        now = _utcnow()
+        year_month = now.strftime("%Y/%m")
+        date_str = now.strftime("%Y-%m-%d")
+        session_dir = os.path.join(self.memory_dir, "sessions", year_month)
+        os.makedirs(session_dir, exist_ok=True)
+
+        # Create filename from date + session id suffix
+        id_suffix = session_id[:8] if session_id else _generate_id()[:8]
+        filename = f"{date_str}-{id_suffix}.md"
+        filepath = os.path.join(session_dir, filename)
+
+        # Build Markdown content
+        lines = [
+            f"---",
+            f"id: {session_id}",
+            f"title: {title}",
+            f"timestamp: {now.isoformat()}",
+            f"message_count: {len(messages)}",
+            f"---",
+            f"",
+            f"# {title}",
+            f"",
+            f"Session: {session_id}",
+            f"Date: {date_str}",
+            f"",
+        ]
+
+        if summary:
+            lines.append(f"## Summary")
+            lines.append("")
+            lines.append(summary)
+            lines.append("")
+
+        lines.append("## Messages")
+        lines.append("")
+
+        for msg in messages:
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                content = " ".join(
+                    str(block.get("text", "")) for block in content if isinstance(block, dict)
+                )
+            if len(str(content)) > 2000:
+                content = str(content)[:2000] + "...[truncated]"
+            lines.append(f"### {role.title()}")
+            lines.append("")
+            lines.append(str(content))
+            lines.append("")
+
+        try:
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines))
+            log.info("Saved session %s to %s", session_id, filepath)
+            return filepath
+        except Exception as e:
+            log.warning("Failed to save session %s: %s", session_id, e)
+            return None
+
+    def build_index(self) -> str:
+        """Build an INDEX.md of all memory files.
+
+        Returns the path to the INDEX.md file.
+        """
+        index_path = os.path.join(self.memory_dir, "INDEX.md")
+        lines = [
+            "---",
+            f"generated: {_utcnow().isoformat()}",
+            "type: index",
+            "---",
+            "",
+            "# Memory Index",
+            "",
+        ]
+
+        categories = sorted(self._all_categories())
+        for category in categories:
+            cat_dir = os.path.join(self.memory_dir, category)
+            if not os.path.isdir(cat_dir):
+                continue
+
+            files = []
+            for root, dirs, filenames in os.walk(cat_dir):
+                for fn in filenames:
+                    if fn.endswith(".md"):
+                        rel = os.path.relpath(
+                            os.path.join(root, fn), self.memory_dir
+                        )
+                        files.append(rel)
+            files.sort()
+
+            if files:
+                lines.append(f"## {category.replace('-', ' ').title()}")
+                lines.append("")
+                for f in files:
+                    lines.append(f"- {f}")
+                lines.append("")
+
+        total = sum(
+            1
+            for _, _, fns in os.walk(self.memory_dir)
+            for fn in fns
+            if fn.endswith(".md") and fn != "INDEX.md"
+        )
+        lines.append(f"---")
+        lines.append(f"Total entries: {total}")
+        lines.append(f"Generated: {_utcnow().isoformat()}")
+
+        try:
+            with open(index_path, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines))
+            log.info("Built INDEX.md with %d entries", total)
+            return index_path
+        except Exception as e:
+            log.warning("Failed to build INDEX.md: %s", e)
+            return ""

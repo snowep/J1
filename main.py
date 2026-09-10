@@ -1,76 +1,75 @@
-"""
-JARVIS OS — CLI entry point (Phase 9 refactor).
+"""JARVIS OS — new entry point for Phase 10 architecture.
 
-Usage:
-    python main.py                 # interactive REPL
-    python main.py --dry-run       # supervisor dry-run (log only)
-    python main.py --config x.yaml # custom config
-    python main.py --once "list files"   # single-shot
+Runs the full stack: policy-gated tools, memory, agent loop.
 """
-
-import argparse
-import json
-import logging
-import os
 import sys
-from typing import Optional
+sys.path.insert(0, ".")
 
-import yaml
-
-from core.agent import Agent
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    datefmt="%H:%M:%S",
-)
+from jarvis.config.loader import Config
+from jarvis.tools.registry import create_default_registry
+from jarvis.policy.engine import PolicyEngine
+from jarvis.tools.executor import ToolExecutor
+from jarvis.memory.store import MemoryStore
+from jarvis.audit.events import AuditLogger
+from jarvis.agent.loop import AgentLoop
 
 
-def load_config(path: Optional[str]) -> dict:
-    """Load config from config.yaml (or .jarvis/config.json fallback)."""
-    if path and os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
-    # default candidate paths
-    for cand in ("config.yaml", os.path.join("config", "config.yaml"), ".jarvis/config.json"):
-        if os.path.exists(cand):
-            if cand.endswith(".json"):
-                with open(cand, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            with open(cand, "r", encoding="utf-8") as f:
-                return yaml.safe_load(f) or {}
-    return {}
+def main():
+    print("JARVIS OS 1.0 — Type 'exit' to quit.")
 
-
-def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="JARVIS OS — Phase 9")
-    parser.add_argument("--config", default=None, help="path to config.yaml")
-    parser.add_argument("--dry-run", action="store_true", help="log actions but don't execute")
-    parser.add_argument("--once", default=None, help="run a single message and exit")
-    args = parser.parse_args(argv)
-
-    cfg = load_config(args.config)
-    if args.dry_run:
-        cfg["dry_run"] = True
-
-    agent = Agent(config=cfg)
-
-    if args.once:
-        print(agent.process(args.once))
-        return 0
-
-    print("JARVIS OS (Phase 9) — type 'exit' to quit. (offline fallback active if no LLM)")
+    # Load config
     try:
-        while True:
-            line = input("\nYou: ").strip()
-            if line.lower() in ("exit", "quit", "q"):
-                break
-            if not line:
-                continue
-            reply = agent.process(line)
-            print(f"JARVIS: {reply}")
-    except (KeyboardInterrupt, EOFError):
-        print("\nGoodbye.")
+        config = Config.load("config.yaml")
+    except Exception as e:
+        print(f"Config error: {e}; using defaults")
+        config = Config.load()
+
+    # Build the stack
+    registry = create_default_registry()
+    policy = PolicyEngine(permissions=config.permissions, tool_registry=registry)
+
+    from jarvis.tools.filesystem import FilesystemTool
+    from jarvis.tools.terminal import TerminalTool
+    from jarvis.tools.internet import InternetTool
+    from jarvis.self.model import SelfModelStore
+    from jarvis.skills.manager import SkillManager
+
+    fs = FilesystemTool(workspace=config.paths.get("workspace", "workspace"))
+    term = TerminalTool(workspace=config.paths.get("workspace", "workspace"))
+    net = InternetTool()
+    mem = MemoryStore(memory_dir=config.paths.get("memory", "memory"))
+    audit = AuditLogger(audit_dir=config.paths.get("audit", "memory/audit"))
+    self_store = SelfModelStore(
+        memory_dir=config.paths.get("memory", "memory/self-model"))
+    skill_mgr = SkillManager(skills_dir=".jarvis/skills")
+
+    executor = ToolExecutor(registry=registry, policy=policy)
+    for name, handler in [
+        ("fs.list", fs.list), ("fs.read", fs.read), ("fs.write", fs.write),
+        ("fs.delete", fs.delete), ("fs.mkdir", fs.mkdir), ("fs.move", fs.move),
+        ("fs.copy", fs.copy), ("fs.search", fs.search),
+        ("terminal.run", term.execute),
+    ]:
+        executor.register_handler(name, handler)
+
+    agent = AgentLoop(config=config, tool_registry=registry,
+                     executor=executor, memory=mem, audit=audit)
+
+    # simple REPL
+    while True:
+        try:
+            user_input = input("\nJARVIS> ").strip()
+        except EOFError:
+            break
+        if not user_input or user_input.lower() in ("exit", "quit"):
+            break
+
+        out = agent.run(user_input)
+        print(f"\n{out}")
+
+        self_store.update_from_action("chat", True, [])
+
+    print("\nGoodbye.")
     return 0
 
 
